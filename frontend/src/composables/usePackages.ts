@@ -1,9 +1,8 @@
 import { ref, computed, toValue } from 'vue'
 import type { MaybeRef, ComputedRef } from 'vue'
 import type { Context, Package } from '../types/api'
-import { deriveVersionKeys, matchesVersionKey } from '../lib/versions'
+import { deriveVersionKeys, matchesVersionKey, scopedByVersion } from '../lib/versions'
 import { isTarballRepo } from '../lib/tarballs'
-import { isUnderPrefix } from '../lib/project'
 
 // A tarball package: in a :tarballs subproject, built against an ssl* repo.
 // Detection is structural (no backend tag), matching the board card + Artifacts.
@@ -50,7 +49,7 @@ export function usePackages(
   }
 
   // availableVersions: version keys (plain + extensions) derived from the
-  // fetched corpus at the context's prefix depth.
+  // fetched corpus at the context prefix.
   const availableVersions: ComputedRef<string[]> = computed(() => {
     const ctx = toValue(context)
     return deriveVersionKeys(
@@ -68,8 +67,9 @@ export function usePackages(
         if (pkg.is_release) return false
         if (!ver) return true
         // Shared common trees live outside the context prefix and are
-        // always shown; everything under the prefix scopes to the key.
-        if (!isUnderPrefix(pkg.project, ctx.prefix)) return true
+        // always shown, as are non-numeric projects in catch-all contexts;
+        // everything else scopes to the key.
+        if (!scopedByVersion(pkg.project, ctx.prefix, ctx.allowedSubprojects)) return true
         return matchesVersionKey(pkg.project, ctx.prefix, ver, ctx.allowedSubprojects)
       })
       .sort((a, b) => (SEVERITY[b.rollup_state] ?? 0) - (SEVERITY[a.rollup_state] ?? 0))

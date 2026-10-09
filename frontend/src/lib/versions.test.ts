@@ -6,6 +6,7 @@ import {
   versionKeyProject,
   selectorVersions,
   keyForVersion,
+  scopedByVersion,
 } from './versions'
 
 const ABSORBED = ['containers', 'tarballs']
@@ -62,6 +63,36 @@ describe('deriveVersionKeys', () => {
   it('surfaces legacy version-less rows as plain chips (accepted transient)', () => {
     expect(deriveVersionKeys(['ppg:staging:containers', 'ppg:staging:extras:containers'], 'ppg:staging', ABSORBED))
       .toEqual(['containers', 'extras'])
+  })
+
+  it('keeps board PR contexts (catch-all, prefix PR:<pr>) free of non-numeric keys', () => {
+    expect(deriveVersionKeys(
+      ['PR:pr-127:ppg:staging:17', 'PR:pr-127:ppg:devel:18', 'PR:pr-127:common:deps'],
+      'PR:pr-127', undefined,
+    )).toEqual([])
+  })
+
+  it('derives numeric keys for artifacts PR contexts (prefix PR:<pr>:ppg:<tier>)', () => {
+    expect(deriveVersionKeys(
+      ['PR:pr-127:ppg:staging:17', 'PR:pr-127:ppg:staging:17:containers:ubi9', 'PR:pr-127:common:deps'],
+      'PR:pr-127:ppg:staging', ABSORBED,
+    )).toEqual(['17'])
+  })
+})
+
+describe('scopedByVersion', () => {
+  it('scopes projects under a product prefix and never the shared trees or root', () => {
+    expect(scopedByVersion('ppg:staging:common:tools', 'ppg:staging', ABSORBED)).toBe(true)
+    expect(scopedByVersion('ppg:staging:18', 'ppg:staging', ABSORBED)).toBe(true)
+    expect(scopedByVersion('ppg:staging', 'ppg:staging', ABSORBED)).toBe(false)
+    expect(scopedByVersion('ppg:common:deps', 'ppg:staging', ABSORBED)).toBe(false)
+    expect(scopedByVersion('common:deps:build', 'ppg:staging', ABSORBED)).toBe(false)
+  })
+
+  it('in catch-all contexts scopes only numeric version segments', () => {
+    expect(scopedByVersion('PR:pr-127:ppg:staging:17', 'PR:pr-127', undefined)).toBe(false)
+    expect(scopedByVersion('PR:pr-127:common:deps', 'PR:pr-127', undefined)).toBe(false)
+    expect(scopedByVersion('ppg:releases:18:containers', 'ppg:releases', undefined)).toBe(true)
   })
 })
 

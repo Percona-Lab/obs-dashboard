@@ -20,10 +20,3 @@ export function projectInContext(project: string, prefix: string): boolean {
   if (parts[1] === 'releases') return false
   return inTree(project, `${parts[0]}:common`) || inTree(project, 'common')
 }
-
-// Is project strictly below prefix (prefix:<more>)? The prefix root itself
-// and anything outside it (shared common trees) are not under the prefix,
-// and the version filters always show those.
-export function isUnderPrefix(project: string, prefix: string): boolean {
-  return project.startsWith(prefix + ':')
-}

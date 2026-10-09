@@ -186,7 +186,7 @@ async function onContextChange(ctx: Context) {
   releaseArtifacts.value = null
   await fetchPackages(ctx)
   // Wait for Vue to flush the context prop so that availableVersions (which uses
-  // props.artifactsContext.prefix depth) and fetchRepos (which reads
+  // props.artifactsContext.prefix) and fetchRepos (which reads
   // props.artifactsContext) both see the newly-selected context, not the old one.
   await nextTick()
   const versions = availableVersions.value

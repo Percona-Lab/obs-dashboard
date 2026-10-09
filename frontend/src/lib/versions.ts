@@ -27,7 +27,7 @@ function compareVersions(a: string, b: string): number {
 /** Derive selector keys from project paths under prefix. Projects outside
  *  prefix (shared common trees) contribute nothing. absorbed lists the
  *  subprojects folded into the plain version entry (undefined = catch-all
- *  context: plain keys only). Order: numeric versions descending, then
+ *  context: numeric plain keys only). Order: numeric versions descending, then
  *  non-numeric alphabetically; within a version the plain key first, then
  *  extensions alphabetical. */
 export function deriveVersionKeys(
@@ -43,6 +43,7 @@ export function deriveVersionKeys(
     const parts = project.split(':')
     const ver = parts[depth]
     if (!ver) continue
+    if (absorbed === undefined && !isNumeric(ver)) continue
     const sub = parts[depth + 1]
     if (!sub || absorbed === undefined || absorbed.includes(sub)) {
       plain.add(ver)
@@ -58,6 +59,17 @@ export function deriveVersionKeys(
     keys.push(...[...extensions].filter(e => e.startsWith(ver + ':')).sort())
   }
   return keys
+}
+
+/** Does project participate in version scoping under prefix? False for
+ *  projects outside the prefix (shared common trees, the prefix root) and,
+ *  in catch-all contexts (absorbed undefined), for projects whose version
+ *  segment is not numeric — those are always shown. */
+export function scopedByVersion(project: string, prefix: string, absorbed: string[] | undefined): boolean {
+  if (!project.startsWith(prefix + ':')) return false
+  if (absorbed !== undefined) return true
+  const ver = project.split(':')[prefix.split(':').length]
+  return ver !== undefined && isNumeric(ver)
 }
 
 /** Does a project belong under prefix at the selected version key?

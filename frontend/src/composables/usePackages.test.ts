@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { ref } from 'vue'
 import { usePackages } from './usePackages'
 import { PPG_STAGING_CONTEXT } from '../lib/contexts'
-import type { Package } from '../types/api'
+import type { Context, Package } from '../types/api'
 
 function pkg(project: string, extra: Partial<Package> = {}): Package {
   return {
@@ -49,5 +49,20 @@ describe('usePackages version scoping', () => {
 
   it('shows everything under the empty key', () => {
     expect(projectsFor('')).toHaveLength(CORPUS.length)
+  })
+})
+
+describe('usePackages catch-all (board PR) contexts', () => {
+  it('shows every PR package under a numeric key', () => {
+    const prCtx = { label: 'PR #127', apiBase: '/api/pr/pr-127', prefix: 'PR:pr-127' } as Context
+    const { data, rawData } = usePackages('/api/pr/pr-127', ref('18'), ref(prCtx))
+    rawData.value = [
+      pkg('PR:pr-127:ppg:staging:17'),
+      pkg('PR:pr-127:ppg:devel:18'),
+      pkg('PR:pr-127:common:deps'),
+    ]
+    expect(data.value.map(p => p.project).sort()).toEqual([
+      'PR:pr-127:common:deps', 'PR:pr-127:ppg:devel:18', 'PR:pr-127:ppg:staging:17',
+    ])
   })
 })
