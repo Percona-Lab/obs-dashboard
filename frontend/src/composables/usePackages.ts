@@ -3,6 +3,7 @@ import type { MaybeRef, ComputedRef } from 'vue'
 import type { Context, Package } from '../types/api'
 import { deriveVersionKeys, matchesVersionKey } from '../lib/versions'
 import { isTarballRepo } from '../lib/tarballs'
+import { isUnderPrefix } from '../lib/project'
 
 // A tarball package: in a :tarballs subproject, built against an ssl* repo.
 // Detection is structural (no backend tag), matching the board card + Artifacts.
@@ -62,14 +63,13 @@ export function usePackages(
   const sorted = computed(() => {
     const ver = toValue(version)
     const ctx = toValue(context)
-    const depth = ctx.prefix.split(':').length
     return [...data.value]
       .filter(pkg => {
         if (pkg.is_release) return false
         if (!ver) return true
-        const seg = pkg.project.split(':')[depth]
-        // Common packages (non-numeric segment at depth) are always shown.
-        if (!seg || !/^\d+$/.test(seg)) return true
+        // Shared common trees live outside the context prefix and are
+        // always shown; everything under the prefix scopes to the key.
+        if (!isUnderPrefix(pkg.project, ctx.prefix)) return true
         return matchesVersionKey(pkg.project, ctx.prefix, ver, ctx.allowedSubprojects)
       })
       .sort((a, b) => (SEVERITY[b.rollup_state] ?? 0) - (SEVERITY[a.rollup_state] ?? 0))

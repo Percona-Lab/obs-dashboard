@@ -3,7 +3,7 @@ import type { MaybeRef } from 'vue'
 import type { Context, Event } from '../types/api'
 import { matchesVersionKey } from '../lib/versions'
 import { isTarballRepo } from '../lib/tarballs'
-import { projectInContext } from '../lib/project'
+import { projectInContext, isUnderPrefix } from '../lib/project'
 
 // A tarball build event: in a :tarballs subproject, on an ssl* repo. Structural,
 // matching the package-side tarball filter (no backend 'tarball' tag exists).
@@ -40,9 +40,9 @@ export function useEvents(apiBase: MaybeRef<string>, version: MaybeRef<string>) 
 
   function matchesEventVersion(event: Event, key: string, ctx: Context): boolean {
     if (!key) return true
-    const seg = event.project.split(':')[ctx.prefix.split(':').length]
-    // Non-numeric segment (common, project events) always passes.
-    if (!seg || !/^\d+$/.test(seg)) return true
+    // The prefix root (project-level events) and the shared common trees
+    // are always shown; projects under the prefix scope to the key.
+    if (!isUnderPrefix(event.project, ctx.prefix)) return true
     return matchesVersionKey(event.project, ctx.prefix, key, ctx.allowedSubprojects)
   }
 
