@@ -80,7 +80,7 @@ const availableVersions = computed<string[]>(() => {
   const ctx = props.artifactsContext
   return deriveVersionKeys(
     artifactsPackages.value.map(p => p.project),
-    ctx.prefix.split(':').length,
+    ctx.prefix,
     ctx.allowedSubprojects,
   )
 })

@@ -54,7 +54,7 @@ export function usePackages(
     const ctx = toValue(context)
     return deriveVersionKeys(
       data.value.map(p => p.project),
-      ctx.prefix.split(':').length,
+      ctx.prefix,
       ctx.allowedSubprojects,
     )
   })
