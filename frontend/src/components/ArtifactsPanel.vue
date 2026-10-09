@@ -45,7 +45,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import type { Context, CveScan } from '../types/api'
 import type { ArtifactBinary, ContainerImage, PackageRow, RepoInfo, Tarball } from '../composables/useArtifacts'
-import { useArtifacts } from '../composables/useArtifacts'
+import { useArtifacts, keyHasPackages } from '../composables/useArtifacts'
 import { useArtifactMetadata } from '../composables/useArtifactMetadata'
 import { deriveVersionKeys, splitVersionKey } from '../lib/versions'
 import ArtifactsVersionBar from './ArtifactsVersionBar.vue'
@@ -201,6 +201,16 @@ async function onContextChange(ctx: Context) {
 
 function onVersionChange(v: string) {
   emit('update:artifactsVersion', v)
+  // A key that holds no packages (the common base holds only images)
+  // would leave the Packages tab empty; move to Containers. Never move
+  // back automatically. Release contexts source packages elsewhere.
+  if (
+    props.artifactsTab === 'packages' &&
+    !isReleaseContext.value &&
+    !keyHasPackages(artifactsPackages.value, props.artifactsContext, v)
+  ) {
+    emit('update:artifactsTab', 'containers')
+  }
 }
 
 const { packageRows: livePackageRows, containerImages: liveContainerImages, tarballs: liveTarballs } = useArtifacts(

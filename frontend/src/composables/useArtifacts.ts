@@ -114,6 +114,16 @@ export function distroGroup(repo: RepoInfo): string {
   return 'Other'
 }
 
+/** Does any non-container package of the corpus match the key in this
+ *  context? Used by the Artifacts panel to leave an empty Packages tab
+ *  for keys that only hold images (e.g. the common base). */
+export function keyHasPackages(packages: Package[], ctx: Context, key: string): boolean {
+  if (!key) return false
+  return packages.some(p =>
+    p.is_container !== true && matchesVersionKey(p.project, ctx.prefix, key, ctx.allowedSubprojects),
+  )
+}
+
 export function useArtifacts(
   packages: MaybeRef<Package[]>,
   version: MaybeRef<string>,
