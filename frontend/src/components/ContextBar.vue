@@ -67,7 +67,7 @@ function tagStyle(_id: string, active: boolean): string {
       </select>
       <code
         class="[font-family:var(--font-mono)] text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]"
-      >{{ versionKeyProject(selectedContext.prefix, version) }}</code>
+      >{{ versionKeyProject(selectedContext.prefix, availableVersions.includes(version) ? version : '') }}</code>
 
       <!-- Version selector: hidden when no versioned packages exist in the context -->
       <VersionSelector

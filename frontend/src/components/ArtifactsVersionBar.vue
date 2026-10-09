@@ -41,7 +41,7 @@ const emit = defineEmits<{
       </select>
       <!-- Selected project path -->
       <code class="font-mono text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]">
-        {{ versionKeyProject(selectedContext.prefix, version) }}
+        {{ versionKeyProject(selectedContext.prefix, availableVersions.includes(version) ? version : '') }}
       </code>
 
       <!-- Version selector -->
