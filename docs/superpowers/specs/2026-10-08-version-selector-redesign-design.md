@@ -94,8 +94,10 @@ their shape.
   `ppg:staging:common:extras:containers` yields `common:extras`.
 - Order: numeric versions descending, then non-numeric versions
   alphabetically. Within a version: plain key first, extensions
-  alphabetical. Catch-all contexts (no absorbed list, i.e. Releases) keep
-  producing plain keys only, as today.
+  alphabetical. Catch-all contexts (no absorbed list: Releases and the
+  Builds board's PR contexts, whose prefix is `PR:<pr>`) keep producing
+  numeric plain keys only, as today; a non-numeric segment there (`ppg`,
+  `common`) never becomes a chip.
 
 `matchesVersionKey` needs no change: `common` and `common:tools` resolve
 to `prefix:common` and `prefix:common:tools` through the existing code.
@@ -108,10 +110,20 @@ Behaviour fix in `usePackages.ts` (`sorted`) and `useEvents.ts`
 (`matchesEventVersion`): the current "non-numeric segment at the version
 position is always shown" rule becomes "a project outside the context
 prefix is always shown; a project inside the prefix goes through
-`matchesVersionKey`". Outside-prefix projects are the shared trees
-(`ppg:common:*`, `common:*`, `PR:<pr>:common`), which `projectInContext`
-already recognises. This stops `common` projects from showing under every
-version while keeping the shared trees visible everywhere.
+`matchesVersionKey`", with one carve-out: in catch-all contexts a project
+whose version segment is non-numeric (`PR:<pr>:ppg:staging:17`,
+`PR:<pr>:common:deps` under prefix `PR:<pr>`) stays always shown, exactly
+as today. The predicate `scopedByVersion(project, prefix, absorbed)` in
+`versions.ts` encodes both rules. Outside-prefix projects are the shared
+trees (`ppg:common:*`, `common:*`, `PR:<pr>:common`). This stops `common`
+projects from showing under every staging/devel version while keeping the
+shared trees visible everywhere and leaving the board's PR contexts
+unchanged. When `ppg:releases:common` appears, give `RELEASES_CONTEXT` an
+absorbed list rather than special-casing the helper.
+
+The path badge next to the context control renders in both bars
+regardless of how many contexts exist, so the approved states are visible
+on production, which always has several contexts.
 
 ## Section 2: selector component
 
