@@ -91,10 +91,9 @@ function selectContext(ctx: Context) {
   selectedContext.value = ctx
   activeTags.value = []
   activeInstances.value = []
-  // Fetch immediately so packages update before availableVersions watcher fires.
-  // The version watcher may fire a second request if version resets, but the
-  // server ignores the version URL param so both return the same data.
-  refresh()
+  // The selectedContext watcher below performs the fetch, so a context set
+  // by URL hydration (ctx=pr-121 resolved once PR groups load) refetches
+  // exactly like a click does.
 }
 
 // Event window state
@@ -182,8 +181,17 @@ const filteredEvents = computed(() => filterEvents(activeTags.value, version.val
 const updatedAt = ref<string | null>(null)
 const refreshing = ref(false)
 
+// A refresh requested while one is in flight runs once more afterwards
+// instead of being dropped: URL hydration resolves a PR context while the
+// initial refresh is still awaiting its PR-groups fetch, and that context
+// change must still produce a fetch for the new apiBase.
+let refreshQueued = false
+
 async function refresh() {
-  if (refreshing.value) return
+  if (refreshing.value) {
+    refreshQueued = true
+    return
+  }
   refreshing.value = true
   try {
     const isCustom = windowMin.value === -1
@@ -200,6 +208,10 @@ async function refresh() {
     updatedAt.value = new Date().toISOString()
   } finally {
     refreshing.value = false
+    if (refreshQueued) {
+      refreshQueued = false
+      void refresh()
+    }
   }
 }
 
@@ -211,6 +223,10 @@ useRealtimeStream(rawPackages, events, prGroups, selectedPrefix, refresh, refres
 
 // Re-fetch on window change
 watch([windowMin, customFrom, customTo], () => refresh())
+
+// Re-fetch whenever the board context changes, whether by click or by URL
+// hydration; both set selectedContext and must swap the data to its apiBase.
+watch(selectedContext, () => refresh())
 </script>
 
 <template>
