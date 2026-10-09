@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Context } from '../types/api'
 import { contextToKey } from '../composables/useUrlState'
+import VersionSelector from './VersionSelector.vue'
+import { versionKeyProject } from '../lib/versions'
 
 defineProps<{
   version: string
@@ -25,7 +27,7 @@ const emit = defineEmits<{
 
       <!-- Context: plain badge when only one context, dropdown when multiple -->
       <code v-if="contexts.length <= 1" class="font-mono text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]">
-        {{ selectedContext.prefix }}:{{ version }}
+        {{ versionKeyProject(selectedContext.prefix, version) }}
       </code>
       <!-- Key options by contextToKey — stable, unique per context (labels
            and apiBases may change). -->
@@ -42,21 +44,13 @@ const emit = defineEmits<{
         >{{ ctx.label }}</option>
       </select>
 
-      <!-- Version segment control -->
-      <div v-if="availableVersions.length > 0" class="flex items-center gap-[6px]">
-        <span class="text-[11px] text-text-muted font-semibold uppercase [letter-spacing:0.06em] mr-[2px]">Version</span>
-        <div class="flex gap-[3px] bg-bg-muted p-[3px] rounded-[9px] border border-border">
-          <button
-            v-for="v in availableVersions"
-            :key="v"
-            class="px-3 py-1 rounded-[7px] border text-[13px] cursor-pointer [font-family:inherit]"
-            :class="v === version
-              ? 'bg-bg-card text-text-primary font-bold border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-              : 'bg-transparent text-text-muted font-medium border-transparent'"
-            @click="emit('update:version', v)"
-          >{{ v }}</button>
-        </div>
-      </div>
+      <!-- Version selector -->
+      <VersionSelector
+        v-if="availableVersions.length > 0"
+        :keys="availableVersions"
+        :model-value="version"
+        @update:model-value="emit('update:version', $event)"
+      />
 
       <!-- Tab switcher -->
       <div class="flex items-center gap-[6px] ml-auto">

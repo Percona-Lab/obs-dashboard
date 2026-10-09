@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Context } from '../types/api'
 import { useInstances } from '../composables/useInstances'
+import VersionSelector from './VersionSelector.vue'
+import { versionKeyProject } from '../lib/versions'
 
 defineProps<{
   version: string
@@ -39,13 +41,6 @@ function formatTime(iso: string | null): string {
   return `${time} · ${isToday ? 'today' : d.toLocaleDateString()}`
 }
 
-function tabStyle(v: string, selected: string): string {
-  const active = v === selected
-  return active
-    ? 'background: var(--bg-card); color: var(--text-primary); font-weight: 700; padding: 4px 12px; border-radius: 7px; border: none; font-size: 13px; cursor: pointer; font-family: inherit;'
-    : 'background: transparent; color: var(--text-muted); font-weight: 500; padding: 4px 12px; border-radius: 7px; border: none; font-size: 13px; cursor: pointer; font-family: inherit;'
-}
-
 function tagStyle(_id: string, active: boolean): string {
   return active
     ? 'background: var(--brand-purple-tint); color: var(--brand-purple); padding: 3px 10px; border-radius: 8px; border: 2px solid var(--brand-purple); font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit;'
@@ -73,21 +68,16 @@ function tagStyle(_id: string, active: boolean): string {
       <code
         v-else
         class="[font-family:var(--font-mono)] text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]"
-      >{{ selectedContext.prefix }}</code>
+      >{{ versionKeyProject(selectedContext.prefix, version) }}</code>
 
-      <!-- Version tabs: hidden when no versioned packages exist in the context -->
-      <div v-if="availableVersions.length > 0" class="flex items-center gap-1.5">
-        <span class="text-[11px] text-text-muted font-semibold uppercase tracking-[0.06em] mr-0.5">Version</span>
-        <div class="flex gap-[3px] bg-bg-muted p-[3px] rounded-[9px]">
-          <button
-            v-for="v in availableVersions"
-            :key="v"
-            @click="emit('update:version', v)"
-            :style="tabStyle(v, version)"
-          >{{ v }}</button>
-          <button @click="emit('update:version', '')" :style="tabStyle('', version)">All</button>
-        </div>
-      </div>
+      <!-- Version selector: hidden when no versioned packages exist in the context -->
+      <VersionSelector
+        v-if="availableVersions.length > 0"
+        :keys="availableVersions"
+        :model-value="version"
+        allow-all
+        @update:model-value="emit('update:version', $event)"
+      />
 
       <div class="ml-auto flex items-center gap-4 text-xs text-text-muted">
         <span
