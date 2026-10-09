@@ -56,7 +56,7 @@ function tagStyle(_id: string, active: boolean): string {
         PostgreSQL
       </span>
 
-      <!-- Context selector: dropdown when multiple contexts exist, plain badge otherwise -->
+      <!-- Context selector: dropdown when multiple contexts exist; the path badge always follows -->
       <select
         v-if="contexts.length > 1"
         :value="selectedContext.apiBase"
@@ -66,7 +66,6 @@ function tagStyle(_id: string, active: boolean): string {
         <option v-for="ctx in contexts" :key="ctx.apiBase" :value="ctx.apiBase">{{ ctx.prefix }}</option>
       </select>
       <code
-        v-else
         class="[font-family:var(--font-mono)] text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]"
       >{{ versionKeyProject(selectedContext.prefix, version) }}</code>
 

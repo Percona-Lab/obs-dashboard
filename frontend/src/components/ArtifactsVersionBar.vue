@@ -25,14 +25,10 @@ const emit = defineEmits<{
       <!-- PostgreSQL badge -->
       <span class="inline-flex items-center gap-[7px] px-3 py-[5px] rounded-[8px] bg-[var(--tint-postgres)] text-[var(--tech-postgres)] text-[12px] font-bold border border-[rgba(0,94,214,0.15)]">PostgreSQL</span>
 
-      <!-- Context: plain badge when only one context, dropdown when multiple -->
-      <code v-if="contexts.length <= 1" class="font-mono text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]">
-        {{ versionKeyProject(selectedContext.prefix, version) }}
-      </code>
-      <!-- Key options by contextToKey — stable, unique per context (labels
+      <!-- Context dropdown when multiple contexts. Key options by contextToKey — stable, unique per context (labels
            and apiBases may change). -->
       <select
-        v-else
+        v-if="contexts.length > 1"
         class="font-mono text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px] border-none cursor-pointer [appearance:auto]"
         :value="contextToKey(selectedContext)"
         @change="emit('update:context', contexts.find(c => contextToKey(c) === ($event.target as HTMLSelectElement).value)!)"
@@ -43,6 +39,10 @@ const emit = defineEmits<{
           :value="contextToKey(ctx)"
         >{{ ctx.label }}</option>
       </select>
+      <!-- Selected project path -->
+      <code class="font-mono text-[12.5px] text-text-secondary bg-bg-muted px-[10px] py-[5px] rounded-[7px]">
+        {{ versionKeyProject(selectedContext.prefix, version) }}
+      </code>
 
       <!-- Version selector -->
       <VersionSelector
