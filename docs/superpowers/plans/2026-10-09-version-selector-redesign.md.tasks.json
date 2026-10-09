@@ -1,0 +1,66 @@
+{
+  "planPath": "docs/superpowers/plans/2026-10-09-version-selector-redesign.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Add Vitest to the frontend",
+      "status": "pending",
+      "description": "**Goal:** A working `npm test` in `frontend/` that runs `src/**/*.test.ts` files, proven by one trivial test against an existing pure function.\n\n**Files:**\n- Modify: `frontend/package.json`\n- Modify: `frontend/vite.config.ts`\n- Create: `frontend/src/lib/versions.test.ts`\n\n**Acceptance Criteria:**\n- [ ] `npm test` runs Vitest once (not watch mode) and exits 0 with 1 passing test.\n- [ ] The existing `*.test-d.ts` compile-time files are not picked up by Vitest.\n- [ ] `npm run build` still succeeds.\n\n**Verify:** `cd frontend && npm test` \u2192 `Test Files  1 passed`, `Tests  1 passed`; `npm run build` \u2192 `\u2713 built`.\n\n```json:metadata\n{\"files\": [\"frontend/package.json\", \"frontend/vite.config.ts\", \"frontend/src/lib/versions.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npm run build\", \"acceptanceCriteria\": [\"npm test runs once and passes 1 test\", \"*.test-d.ts files are not collected\", \"npm run build succeeds\"], \"modelTier\": \"mechanical\"}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: Key derivation accepts the `common` pseudo-version",
+      "status": "pending",
+      "description": "**Goal:** `deriveVersionKeys` takes the context prefix, ignores projects outside it, accepts non-numeric version segments, and orders numeric versions first; plus `versionKeyProject` and the selector row helpers, all unit tested.\n\n**Files:**\n- Modify: `frontend/src/lib/versions.ts`\n- Modify: `frontend/src/lib/versions.test.ts`\n- Modify: `frontend/src/composables/usePackages.ts:55-59` (call site)\n- Modify: `frontend/src/components/ArtifactsPanel.vue:79-86` (call site)\n\n**Acceptance Criteria:**\n- [ ] `deriveVersionKeys(projects, 'ppg:staging', ['containers','tarballs'])` on the staging corpus returns `['19','18','18:extras','17','17:extras','16','16:extras','16:tde','15','14','common','common:extras','common:tools']`.\n- [ ] Projects outside the prefix (`ppg:common:deps`, `common:deps:build`) contribute no key.\n- [ ] Catch-all contexts (absorbed `undefined`) still yield plain keys only.\n- [ ] `versionKeyProject('ppg:staging', 'common:tools')` is `ppg:staging:common:tools`; empty key returns the prefix.\n- [ ] `selectorVersions` and `keyForVersion` behave as specified in the tests below.\n- [ ] `npm test` and `npm run build` pass; the two call sites compile with the new signature.\n\n**Verify:** `cd frontend && npm test && npm run build`\n\n```json:metadata\n{\"files\": [\"frontend/src/lib/versions.ts\", \"frontend/src/lib/versions.test.ts\", \"frontend/src/composables/usePackages.ts\", \"frontend/src/components/ArtifactsPanel.vue\"], \"verifyCommand\": \"cd frontend && npm test && npm run build\", \"acceptanceCriteria\": [\"staging corpus derives the 13 keys in spec order\", \"projects outside the prefix contribute no key\", \"catch-all contexts yield plain keys only\", \"versionKeyProject maps keys to base projects\", \"selectorVersions/keyForVersion match tests\"], \"modelTier\": \"mechanical\"}\n```",
+      "blockedBy": [
+        0
+      ]
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Board and events scope `common` projects to their key",
+      "status": "pending",
+      "description": "**Goal:** `usePackages` and `useEvents` always show projects outside the context prefix and run every project inside the prefix through `matchesVersionKey`, so `ppg:staging:common:*` stops appearing under every version.\n\n**Files:**\n- Modify: `frontend/src/lib/project.ts`\n- Modify: `frontend/src/composables/usePackages.ts:62-76`\n- Modify: `frontend/src/composables/useEvents.ts:41-47`\n- Create: `frontend/src/composables/usePackages.test.ts`\n- Create: `frontend/src/composables/useEvents.test.ts`\n\n**Acceptance Criteria:**\n- [ ] With key `18` on staging, a `ppg:staging:common:tools` package is hidden and a `ppg:common:deps` package is shown.\n- [ ] With key `common:tools`, `ppg:staging:common:tools` and `ppg:staging:common:tools:containers` packages are shown, `ppg:staging:18` is hidden, `ppg:common:deps` is shown.\n- [ ] With the empty key everything non-release is shown.\n- [ ] Events follow the same rules, and an event on the prefix root `ppg:staging` is always shown.\n- [ ] `npm test` and `npm run build` pass.\n\n**Verify:** `cd frontend && npm test && npm run build`\n\n```json:metadata\n{\"files\": [\"frontend/src/lib/project.ts\", \"frontend/src/composables/usePackages.ts\", \"frontend/src/composables/useEvents.ts\", \"frontend/src/composables/usePackages.test.ts\", \"frontend/src/composables/useEvents.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npm run build\", \"acceptanceCriteria\": [\"key 18 hides ppg:staging:common:tools and shows ppg:common:deps\", \"key common:tools shows its subtree and shared trees only\", \"empty key shows all\", \"events: prefix root always shown\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: VersionSelector component",
+      "status": "pending",
+      "description": "**Goal:** A `VersionSelector.vue` that renders the version row (optionally with All) and the conditional subproject row, emitting a valid key on every click, with component tests.\n\n**Files:**\n- Create: `frontend/src/components/VersionSelector.vue`\n- Create: `frontend/src/components/VersionSelector.test.ts`\n\n**Acceptance Criteria:**\n- [ ] Version row shows `selectorVersions(keys)`; with `allowAll` an extra `All` chip follows.\n- [ ] Subproject row renders only when the selected version has more than one key, labelled `base` for the plain key and the subproject name otherwise. Hidden when the empty key is selected.\n- [ ] Clicking a version chip emits `keyForVersion(keys, version)`; clicking a subproject chip emits that key; clicking All emits `''`.\n- [ ] Chip classes match the Artifacts bar's existing ones (listed in Step 3).\n- [ ] `npm test` and `npm run build` pass.\n\n**Verify:** `cd frontend && npm test && npm run build`\n\n```json:metadata\n{\"files\": [\"frontend/src/components/VersionSelector.vue\", \"frontend/src/components/VersionSelector.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npm run build\", \"acceptanceCriteria\": [\"version row lists distinct versions plus All when allowed\", \"subproject row only with >1 key, base label for plain key\", \"clicks emit plain key, first extension, subproject key, or empty for All\", \"selected chips carry font-bold\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        2
+      ]
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Wire the selector into both bars",
+      "status": "pending",
+      "description": "**Goal:** `ContextBar.vue` and `ArtifactsVersionBar.vue` render `VersionSelector` instead of their inline chip loops, and their path badges show the selected key's base project.\n\n**Files:**\n- Modify: `frontend/src/components/ContextBar.vue:44-50` (remove `tabStyle`), `:69-92` (badge and version tabs)\n- Modify: `frontend/src/components/ArtifactsVersionBar.vue:1-19` (imports), `:26-29` (badge), `:45-59` (version chips)\n\n**Acceptance Criteria:**\n- [ ] Board bar: `VersionSelector` with `allow-all`, bound to `version`, emitting `update:version`. The single-context `<code>` badge shows `versionKeyProject(selectedContext.prefix, version)`. `tabStyle` is deleted; `tagStyle` stays.\n- [ ] Artifacts bar: `VersionSelector` without All, bound to `version`, emitting `update:version`. The single-context `<code>` badge shows `versionKeyProject(selectedContext.prefix, version)`. The tab switcher keeps `ml-auto` on the right.\n- [ ] Both bars hide the selector when `availableVersions` is empty, as before.\n- [ ] `npm test` and `npm run build` pass. `vue-tsc` reports no unused symbols.\n\n**Verify:** `cd frontend && npm test && npm run build`\n\n```json:metadata\n{\"files\": [\"frontend/src/components/ContextBar.vue\", \"frontend/src/components/ArtifactsVersionBar.vue\"], \"verifyCommand\": \"cd frontend && npm test && npm run build\", \"acceptanceCriteria\": [\"board bar uses VersionSelector with allow-all and versionKeyProject badge\", \"artifacts bar uses VersionSelector without All and versionKeyProject badge\", \"tabStyle removed\", \"build passes\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        3
+      ]
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Artifacts Packages tab auto-switches for package-less keys",
+      "status": "pending",
+      "description": "**Goal:** When the selected Artifacts key changes while the Packages tab is active and no non-container package matches the new key, the panel switches to the Containers tab. It never switches back by itself.\n\n**Files:**\n- Modify: `frontend/src/composables/useArtifacts.ts` (export `keyHasPackages`)\n- Create: `frontend/src/composables/useArtifacts.test.ts`\n- Modify: `frontend/src/components/ArtifactsPanel.vue:202-204` (`onVersionChange`)\n\n**Acceptance Criteria:**\n- [ ] `keyHasPackages(packages, ctx, 'common')` is false when only container images match; true for `common:tools` when a package matches; false for the empty key list.\n- [ ] Selecting `common` while on Packages switches the tab to Containers; selecting `18` afterwards leaves the tab on Containers; selecting `common` while on Tarballs leaves it on Tarballs.\n- [ ] Release contexts are unaffected (their packages come from a different source).\n- [ ] `npm test` and `npm run build` pass.\n\n**Verify:** `cd frontend && npm test && npm run build`\n\n```json:metadata\n{\"files\": [\"frontend/src/composables/useArtifacts.ts\", \"frontend/src/composables/useArtifacts.test.ts\", \"frontend/src/components/ArtifactsPanel.vue\"], \"verifyCommand\": \"cd frontend && npm test && npm run build\", \"acceptanceCriteria\": [\"keyHasPackages false for common base, true for common:tools, true for 18, false for empty corpus\", \"onVersionChange switches packages->containers only when key has no packages and context is not a release\", \"never switches back\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        4
+      ]
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Push, deploy, and verify the three approved states on prod",
+      "status": "pending",
+      "description": "**Goal:** The redesign is live on production and the three approved Artifacts bar states render as specified.\n\n**Files:**\n- None modified. Verification only.\n\n**Acceptance Criteria:**\n- [ ] `origin/main` contains all commits from Tasks 0 to 5.\n- [ ] Production container runs the new commit (`git log -1` on the server matches the pushed HEAD).\n- [ ] Artifacts, PPG Staging, key `common`: version row `19 18 17 16 15 14 common` (plus transient `containers`/`extras` chips if the legacy rows still exist), subproject row `base \u00b7 extras \u00b7 tools`, badge `ppg:staging:common`, Containers tab showing images.\n- [ ] Key `16:tde`: subproject row `base \u00b7 extras \u00b7 tde`, badge `ppg:staging:16:tde`.\n- [ ] Key `19`: no subproject row, badge `ppg:staging:19`.\n- [ ] Builds board, key `18`: no `ppg:staging:common:*` package cards; `ppg:common:deps` cards still present.\n\n**Verify:** Visual check in the browser at the production URL, plus the API spot check below.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"ssh <prod-host> 'cd ~/percona-obs-dashboard && git log --oneline -1'\", \"acceptanceCriteria\": [\"origin/main pushed\", \"prod runs the pushed HEAD\", \"common state renders base/extras/tools\", \"16:tde state renders base/extras/tde\", \"19 state has no subproject row\", \"board key 18 hides common projects\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        5
+      ]
+    }
+  ],
+  "lastUpdated": "2026-10-09T21:00:12.208436+00:00"
+}
