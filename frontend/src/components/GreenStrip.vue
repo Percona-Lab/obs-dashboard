@@ -73,6 +73,9 @@ function fullyPublished(pkg: Package): boolean {
             :class="fullyPublished(pkg) ? 'bg-ok' : 'bg-warn'"
           ></span>
           <code class="font-mono text-[11px] text-text-secondary">{{ pkg.name }}</code>
+          <!-- Built version (versrel, or the first image tag for containers); aggregates
+               resolve to their source package's version in the backend. -->
+          <code v-if="pkg.version" data-role="version" class="font-mono text-[11px] text-text-muted">{{ pkg.version }}</code>
         </a>
       </div>
     </div>

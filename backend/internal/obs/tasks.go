@@ -346,6 +346,15 @@ func (t VersionTask) Run(ctx context.Context, client *Fleet, pkg *model.Package,
 		slog.Warn("obs: version result", "pkg", pkg.Name, "err", err)
 		return nil
 	}
+	if versrel == "" {
+		// Aggregates (_aggregate links to e.g. ppg:common:deps) report no
+		// versrel of their own; take the source package's instead.
+		versrel, err = client.AggregateVersionResult(ctx, pkg.Project, pkg.Name)
+		if err != nil {
+			slog.Warn("obs: aggregate version result", "pkg", pkg.Name, "err", err)
+			return nil
+		}
+	}
 	if versrel == "" || versrel == pkg.Version {
 		return nil
 	}

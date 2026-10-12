@@ -611,6 +611,34 @@ func (e *firstHostErrors) err() error {
 }
 
 // PackageVersionResult returns the first non-empty versrel in config order.
+// AggregateVersionResult resolves the versrel of an aggregate package by
+// following its _aggregate link on the same host: the source project named
+// in the file is already an instance-local name, so it is queried directly.
+// Returns "" with nil error when the package is not an aggregate or the
+// source has no built target.
+func (f *Fleet) AggregateVersionResult(ctx context.Context, project, pkg string) (string, error) {
+	var errs firstHostErrors
+	for _, in := range f.hosts(project) {
+		srcProject, srcPkg, ok, err := in.Client.PackageAggregateSource(ctx, in.ToInstance(project), pkg)
+		in.observe(err)
+		if err != nil {
+			errs.add(err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		v, err := in.Client.PackageVersionResult(ctx, srcProject, srcPkg)
+		in.observe(err)
+		if err != nil {
+			errs.add(err)
+			continue
+		}
+		return v, nil
+	}
+	return "", errs.real
+}
+
 func (f *Fleet) PackageVersionResult(ctx context.Context, project, pkg string) (string, error) {
 	var lastErr error
 	succeeded := false

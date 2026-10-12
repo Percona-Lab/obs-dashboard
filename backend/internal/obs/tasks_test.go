@@ -1069,3 +1069,95 @@ func TestContainerTagsTaskReleaseDisabledPerBaseImageRepos(t *testing.T) {
 		t.Error("expected the containerinfo listing to be fetched from a discovered repo")
 	}
 }
+
+// Aggregate packages report an empty versrel; VersionTask follows the
+// _aggregate link and takes the source package's versrel instead.
+func TestVersionTaskResolvesAggregateVersion(t *testing.T) {
+	var paths []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path+"?"+r.URL.RawQuery)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_aggregate"):
+			fmt.Fprint(w, `<aggregatelist>
+				<aggregate project="isv:percona:ppg:common:deps">
+					<package>etcd</package>
+					<repository source="UBI_9" target="UBI_9"/>
+				</aggregate>
+			</aggregatelist>`)
+		case strings.Contains(r.URL.Path, "/build/isv:percona:ppg:common:deps/_result"):
+			fmt.Fprint(w, `<resultlist>
+				<result repository="UBI_9" arch="x86_64" state="published">
+					<status package="etcd" code="succeeded" versrel="3.5.1-1"/>
+				</result>
+			</resultlist>`)
+		default:
+			fmt.Fprint(w, `<resultlist>
+				<result repository="UBI_9" arch="x86_64" state="published">
+					<status package="etcd" code="succeeded"/>
+				</result>
+			</resultlist>`)
+		}
+	}))
+	defer ts.Close()
+
+	c := obs.SingleFleet(obs.NewClient(ts.URL, "u", "p"), "isv:percona")
+	pkg := &model.Package{
+		Project:     "ppg:staging:18",
+		Name:        "etcd",
+		RollupState: model.RollupSucceeded,
+		IsContainer: boolPtr(false),
+		UpdatedAt:   time.Now().UTC(),
+	}
+
+	if err := (obs.VersionTask{}).Run(context.Background(), c, pkg, nil); err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Version != "3.5.1-1" {
+		t.Errorf("expected aggregate source version %q, got %q (paths %v)", "3.5.1-1", pkg.Version, paths)
+	}
+}
+
+// A package with an empty versrel that is not an aggregate (no _aggregate
+// file) keeps an empty version.
+func TestVersionTaskEmptyVersrelNonAggregate(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_aggregate") {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `<resultlist><result repository="UBI_9" arch="x86_64" state="published">
+			<status package="never-built" code="unresolvable"/></result></resultlist>`)
+	}))
+	defer ts.Close()
+
+	c := obs.SingleFleet(obs.NewClient(ts.URL, "u", "p"), "isv:percona")
+	pkg := &model.Package{Project: "ppg:staging:18", Name: "never-built", IsContainer: boolPtr(false), UpdatedAt: time.Now().UTC()}
+	if err := (obs.VersionTask{}).Run(context.Background(), c, pkg, nil); err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Version != "" {
+		t.Errorf("expected empty version, got %q", pkg.Version)
+	}
+}
+
+// A non-empty versrel never triggers the aggregate lookup.
+func TestVersionTaskSkipsAggregateLookupWhenBuilt(t *testing.T) {
+	aggregateCalled := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_aggregate") {
+			aggregateCalled = true
+		}
+		fmt.Fprint(w, `<resultlist><result repository="UBI_9" arch="x86_64" state="published">
+			<status package="p" code="succeeded" versrel="1.0-1"/></result></resultlist>`)
+	}))
+	defer ts.Close()
+
+	c := obs.SingleFleet(obs.NewClient(ts.URL, "u", "p"), "isv:percona")
+	pkg := &model.Package{Project: "ppg:staging:18", Name: "p", IsContainer: boolPtr(false), UpdatedAt: time.Now().UTC()}
+	if err := (obs.VersionTask{}).Run(context.Background(), c, pkg, nil); err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Version != "1.0-1" || aggregateCalled {
+		t.Errorf("version %q, aggregate lookup called = %v", pkg.Version, aggregateCalled)
+	}
+}

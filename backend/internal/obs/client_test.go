@@ -702,3 +702,39 @@ func TestBuildResultsRepoStates(t *testing.T) {
 		t.Fatalf("images/aarch64 state = %q, want building", got)
 	}
 }
+
+func TestPackageAggregateSource(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		status   int
+		wantProj string
+		wantPkg  string
+		wantOK   bool
+	}{
+		{"explicit package", `<aggregatelist><aggregate project="isv:percona:ppg:common:deps"><package>etcd</package></aggregate></aggregatelist>`, 200, "isv:percona:ppg:common:deps", "etcd", true},
+		{"whole project defaults to same name", `<aggregatelist><aggregate project="isv:percona:ppg:common:deps"/></aggregatelist>`, 200, "isv:percona:ppg:common:deps", "etcd", true},
+		{"several packages picks the matching name", `<aggregatelist><aggregate project="isv:percona:ppg:common:deps"><package>other</package><package>etcd</package></aggregate></aggregatelist>`, 200, "isv:percona:ppg:common:deps", "etcd", true},
+		{"not an aggregate", ``, 404, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/source/isv:percona:ppg:staging:18/etcd/_aggregate" {
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c := NewClient(srv.URL, "u", "p")
+			proj, pkg, ok, err := c.PackageAggregateSource(context.Background(), "isv:percona:ppg:staging:18", "etcd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if proj != tc.wantProj || pkg != tc.wantPkg || ok != tc.wantOK {
+				t.Errorf("got (%q, %q, %v), want (%q, %q, %v)", proj, pkg, ok, tc.wantProj, tc.wantPkg, tc.wantOK)
+			}
+		})
+	}
+}

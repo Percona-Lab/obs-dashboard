@@ -794,6 +794,49 @@ func (c *Client) PackageVersionResult(ctx context.Context, project, pkg string) 
 	return "", nil
 }
 
+// PackageAggregateSource reads /source/<project>/<pkg>/_aggregate and returns
+// the source project and package the aggregate pulls its binaries from. ok is
+// false (with nil error) when the package has no _aggregate file, i.e. it is
+// not an aggregate. When the aggregate lists no <package>, OBS aggregates the
+// same package name from the source project; when it lists several, the one
+// matching pkg wins, else the first. Only the first <aggregate> is used.
+func (c *Client) PackageAggregateSource(ctx context.Context, project, pkg string) (srcProject, srcPkg string, ok bool, err error) {
+	path := fmt.Sprintf("/source/%s/%s/_aggregate", url.PathEscape(project), url.PathEscape(pkg))
+	resp, err := c.get(ctx, "aggregate_source", path)
+	if err != nil {
+		if IsNotFound(err) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	defer resp.Body.Close()
+
+	var list struct {
+		Aggregates []struct {
+			Project  string   `xml:"project,attr"`
+			Packages []string `xml:"package"`
+		} `xml:"aggregate"`
+	}
+	if err := xml.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return "", "", false, fmt.Errorf("parse _aggregate for %s/%s: %w", project, pkg, err)
+	}
+	if len(list.Aggregates) == 0 || list.Aggregates[0].Project == "" {
+		return "", "", false, nil
+	}
+	agg := list.Aggregates[0]
+	srcPkg = pkg
+	if len(agg.Packages) > 0 {
+		srcPkg = agg.Packages[0]
+		for _, name := range agg.Packages {
+			if name == pkg {
+				srcPkg = name
+				break
+			}
+		}
+	}
+	return agg.Project, srcPkg, true, nil
+}
+
 // ProjectBinaryList returns every binary entry from _result?view=binarylist.
 func (c *Client) ProjectBinaryList(ctx context.Context, project string) ([]BinaryArtifact, error) {
 	path := fmt.Sprintf("/build/%s/_result?view=binarylist", url.PathEscape(project))
