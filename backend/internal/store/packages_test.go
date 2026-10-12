@@ -1160,3 +1160,40 @@ func TestCleanupOrphanedCveRows(t *testing.T) {
 		t.Fatalf("live package's cve rows were removed: scans=%d periods=%d", scans, periods)
 	}
 }
+
+// Startup backfill: settled, built, non-container packages with no version
+// (aggregates resolved by VersionTask after the fact) are re-seeded once.
+func TestGetVersionlessBuiltPackages(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	f, tr := false, true
+	pkgs := []*model.Package{
+		{Project: "p", Name: "aggregate", RollupState: model.RollupPublished, Settled: true, IsContainer: &f, UpdatedAt: now},
+		{Project: "p", Name: "built-succeeded", RollupState: model.RollupSucceeded, Settled: true, IsContainer: &f, UpdatedAt: now},
+		{Project: "p", Name: "has-version", RollupState: model.RollupPublished, Settled: true, IsContainer: &f, Version: "1.0-1", UpdatedAt: now},
+		{Project: "p", Name: "container", RollupState: model.RollupPublished, Settled: true, IsContainer: &tr, UpdatedAt: now},
+		{Project: "p", Name: "failed", RollupState: model.RollupFailed, Settled: true, IsContainer: &f, UpdatedAt: now},
+		{Project: "p", Name: "unsettled", RollupState: model.RollupPublished, Settled: false, IsContainer: &f, UpdatedAt: now},
+	}
+	for _, p := range pkgs {
+		if err := UpsertPackageState(db, p, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := GetVersionlessBuiltPackages(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range got {
+		names = append(names, p.Name)
+	}
+	want := []string{"aggregate", "built-succeeded"}
+	if len(names) != len(want) || names[0] != want[0] || names[1] != want[1] {
+		t.Fatalf("GetVersionlessBuiltPackages = %v, want %v", names, want)
+	}
+}

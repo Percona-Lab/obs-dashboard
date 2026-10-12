@@ -87,9 +87,17 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("seed working set: %w", err)
 	}
+	// One-shot backfill: settled built packages with no version (aggregates)
+	// get a single pass so VersionTask can resolve them, then settle out.
+	versionless, err := store.GetVersionlessBuiltPackages(db)
+	if err != nil {
+		return fmt.Errorf("seed version backfill: %w", err)
+	}
 	ws := workingset.New(cfg.WorkerPool.QueueSize, cfg.WorkerPool.PollInterval,
 		cfg.WorkerPool.BackoffMax, cfg.WorkerPool.BatchThreshold)
 	ws.Seed(activePkgs)
+	ws.Seed(versionless)
+	slog.Info("worker: seeded working set", "active", len(activePkgs), "version_backfill", len(versionless))
 	// Seed repo owners and membership from every stored package (settled
 	// ones too) before the poller's first tick, so packages living on an
 	// instance that is down at startup are carried forward, not dropped.

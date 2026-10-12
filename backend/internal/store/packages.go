@@ -650,6 +650,28 @@ func GetActivePackages(db *sql.DB) ([]*model.Package, error) {
 	return scanPackages(db, rows)
 }
 
+// GetVersionlessBuiltPackages returns settled, built, non-container packages
+// whose version is still empty. Used once at startup to re-seed the working
+// set so VersionTask can resolve aggregate packages (which report no versrel
+// of their own) without waiting for their next build; each gets one pass and
+// settles out again.
+func GetVersionlessBuiltPackages(db *sql.DB) ([]*model.Package, error) {
+	rows, err := db.Query(`SELECT`+packageSelectCols+`
+		FROM packages
+		WHERE settled = 1
+		  AND version = ''
+		  AND COALESCE(is_container, 0) = 0
+		  AND rollup_state IN (?, ?)
+		ORDER BY project, name`,
+		string(model.RollupSucceeded), string(model.RollupPublished),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPackages(db, rows)
+}
+
 // GetFinishedPackagesByProject returns succeeded packages for a project.
 // Used by the MQ consumer on repo.published to signal packages for a publish
 // state re-check via the worker pool.
