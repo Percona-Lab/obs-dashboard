@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import type { ArtifactBinary, PackageRow, RepoInfo } from '../composables/useArtifacts'
 import { distroGroup } from '../composables/useArtifacts'
 import { formatArtifactTime } from '../lib/cve'
 import { useInstances } from '../composables/useInstances'
 import { obsProject, downloadBase } from '../lib/instances'
+import { repoSetupSnippet } from '../lib/repoSetup'
 import InstanceBadge from './InstanceBadge.vue'
 
 const props = defineProps<{
@@ -49,39 +50,42 @@ const showPackageList = computed(() => props.selectedRepo !== null || props.pack
 
 const { instanceFor } = useInstances()
 
+// sudo toggle for the setup snippet: on by default (PG-2745), remembered
+// per browser. Storage access is best-effort — private windows and blocked
+// site data must not break the tab.
+const SUDO_STORAGE_KEY = 'obs-dashboard-repo-setup-sudo'
+function readStoredSudo(): boolean {
+  try {
+    return localStorage.getItem(SUDO_STORAGE_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+const useSudo = ref(readStoredSudo())
+function setSudo(on: boolean) {
+  useSudo.value = on
+  try {
+    localStorage.setItem(SUDO_STORAGE_KEY, on ? 'on' : 'off')
+  } catch {
+    // ignore: preference simply will not persist
+  }
+}
+
 const snippet = computed(() => {
   const repo = props.selectedRepo
   if (!repo) return ''
   const project = props.packageRows[0]?.project ?? `ppg:${props.version}`
   const inst = instanceFor(props.packageRows[0]?.instance)
   if (!inst) return ''
-  const obsProjectName = obsProject(inst, project) // repo alias / file names, as today
-  const baseUrl = downloadBase(inst, project, repo.obs)
-  const projectId = obsProjectName.split(':').join('_')
-
-  if (repo.obs.startsWith('openSUSE')) {
-    return `zypper addrepo \\
-  ${baseUrl} \\
-  ${obsProjectName}
-zypper --gpg-auto-import-keys refresh`
-  }
-
-  if (repo.type === 'rpm') {
-    return `rpm --import ${baseUrl}repodata/repomd.xml.key
-tee /etc/yum.repos.d/${projectId}.repo << 'EOF'
-[${obsProjectName}]
-name=${obsProjectName} - ${repo.obs}
-baseurl=${baseUrl}
-enabled=1
-gpgcheck=0
-EOF`
-  }
-
-  return `echo 'deb ${baseUrl} /' \\
-  | tee /etc/apt/sources.list.d/${obsProjectName}.list
-curl -fsSL ${baseUrl}Release.key \\
-  | gpg --dearmor | tee /etc/apt/trusted.gpg.d/${projectId}.gpg > /dev/null
-apt update`
+  return repoSetupSnippet(
+    {
+      obsProjectName: obsProject(inst, project), // repo alias / file names, as today
+      baseUrl: downloadBase(inst, project, repo.obs),
+      repoObs: repo.obs,
+      repoType: repo.type,
+    },
+    { sudo: useSudo.value },
+  )
 })
 
 // ----- binary expansion -----
@@ -288,15 +292,38 @@ function canExpand(row: PackageRow): boolean {
           </div>
         </div>
         <div class="px-[18px] pb-[18px]">
-          <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center justify-between gap-3 mb-2">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-text-muted">Repository setup</span>
-            <button
-              class="text-[12px] py-1 px-[10px] rounded-md border border-border bg-bg-card text-text-secondary cursor-pointer"
-              :class="{ 'text-[var(--success)] border-[var(--success)]': copiedKey === 'repo-config' }"
-              @click="emit('copy', 'repo-config', snippet)"
-            >
-              {{ copiedKey === 'repo-config' ? '✓ Copied' : 'Copy' }}
-            </button>
+            <div class="flex items-center gap-2">
+              <!-- sudo toggle: root shells and minimal containers have no sudo -->
+              <div class="flex gap-[3px] bg-bg-muted p-[3px] rounded-[9px] border border-border" role="group" aria-label="Privilege prefix">
+                <button
+                  type="button"
+                  class="px-3 py-[2px] rounded-[7px] border text-[12px] cursor-pointer [font-family:inherit]"
+                  :class="useSudo
+                    ? 'bg-bg-card text-text-primary font-bold border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                    : 'bg-transparent text-text-muted font-medium border-transparent'"
+                  :aria-pressed="useSudo"
+                  @click="setSudo(true)"
+                >sudo</button>
+                <button
+                  type="button"
+                  class="px-3 py-[2px] rounded-[7px] border text-[12px] cursor-pointer [font-family:inherit]"
+                  :class="!useSudo
+                    ? 'bg-bg-card text-text-primary font-bold border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                    : 'bg-transparent text-text-muted font-medium border-transparent'"
+                  :aria-pressed="!useSudo"
+                  @click="setSudo(false)"
+                >no sudo</button>
+              </div>
+              <button
+                class="text-[12px] py-1 px-[10px] rounded-md border border-border bg-bg-card text-text-secondary cursor-pointer"
+                :class="{ 'text-[var(--success)] border-[var(--success)]': copiedKey === 'repo-config' }"
+                @click="emit('copy', 'repo-config', snippet)"
+              >
+                {{ copiedKey === 'repo-config' ? '✓ Copied' : 'Copy' }}
+              </button>
+            </div>
           </div>
           <pre class="bg-bg-card-2 py-[14px] px-4 rounded-lg font-code text-[12px] whitespace-pre overflow-x-auto m-0"><code class="font-code">{{ snippet }}</code></pre>
         </div>
