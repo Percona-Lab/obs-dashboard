@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useSettingsUsers } from '../composables/useSettingsUsers'
+import ServiceZone from './ServiceZone.vue'
 
 const { user } = useAuth()
 const { admins, users, loadError, list, add, remove } = useSettingsUsers()
@@ -28,6 +29,7 @@ async function onRemove(email: string) {
 
 <template>
   <div class="flex flex-col gap-5">
+    <ServiceZone />
     <section data-testid="access-zone" class="rounded-[14px] border border-border bg-bg-card p-5 flex flex-col gap-4">
       <header class="flex flex-col gap-1">
         <h2 class="m-0 text-[16px] font-bold text-text-primary">Access</h2>

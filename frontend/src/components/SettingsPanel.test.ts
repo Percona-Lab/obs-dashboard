@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import SettingsPanel from './SettingsPanel.vue'
 import { useAuth, resetAuthForTests } from '../composables/useAuth'
+import { resetUpgradesForTests } from '../composables/useUpgrades'
 
 const listBody = {
   admins: ['root@percona.com'],
@@ -18,8 +19,11 @@ let fetchFn: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   resetAuthForTests()
+  resetUpgradesForTests()
   useAuth().user.value = 'alice@percona.com'
-  handler = () => new Response(JSON.stringify(listBody), { status: 200 })
+  handler = (url: string) => (url.startsWith('/api/upgrades')
+    ? new Response(JSON.stringify({ current: 'v0.1.0', host_files_version: '', repo: 'Percona-Lab/obs-dashboard', apply_enabled: false, in_flight: '', checked_at: null, releases: [] }), { status: 200 })
+    : new Response(JSON.stringify(listBody), { status: 200 }))
   fetchFn = vi.fn((url: string, init?: RequestInit) => Promise.resolve(handler(url, init)))
   vi.stubGlobal('fetch', fetchFn)
 })
