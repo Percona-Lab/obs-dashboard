@@ -117,3 +117,9 @@ auth:
   admins: []
   # How long a sign-in lasts. Env: AUTH_SESSION_TTL.
   session_ttl: "168h"
+
+# Release checks for upgrades from Settings → Service. Applying requires the
+# host files described in deploy/host/README.md (UPGRADE_APPLY_DIR).
+upgrades:
+  github_repo: Percona-Lab/obs-dashboard
+  check_interval: 1h

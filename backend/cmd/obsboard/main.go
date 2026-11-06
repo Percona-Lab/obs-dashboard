@@ -24,6 +24,7 @@ import (
 	"github.com/percona/obs-dashboard/internal/store"
 	"github.com/percona/obs-dashboard/internal/telemetry"
 	"github.com/percona/obs-dashboard/internal/unblocker"
+	"github.com/percona/obs-dashboard/internal/upgrade"
 	"github.com/percona/obs-dashboard/internal/version"
 	"github.com/percona/obs-dashboard/internal/worker"
 	"github.com/percona/obs-dashboard/internal/workingset"
@@ -75,6 +76,25 @@ func run() error {
 	if err := authSvc.PruneExpired(); err != nil {
 		slog.Warn("auth: prune expired sessions", "err", err)
 	}
+
+	if cfg.Upgrades.ApplyDir != "" {
+		if err := upgrade.ValidateApplyDir(cfg.Upgrades.ApplyDir); err != nil {
+			return fmt.Errorf("upgrades: %w", err)
+		}
+	}
+	upg := upgrade.NewManager(upgrade.Options{
+		DB:               db,
+		DBPath:           cfg.Store.DBPath,
+		Source:           upgrade.GitHubSource{Repo: cfg.Upgrades.GitHubRepo},
+		Repo:             cfg.Upgrades.GitHubRepo,
+		Current:          version.Version,
+		HostFilesVersion: cfg.Upgrades.HostFilesVersion,
+		ApplyDir:         cfg.Upgrades.ApplyDir,
+		Interval:         cfg.Upgrades.CheckInterval,
+	})
+	upg.Reconcile(true)
+	go upg.Run(ctx)
+	slog.Info("upgrades: release checks enabled", "repo", cfg.Upgrades.GitHubRepo, "apply_enabled", upg.ApplyEnabled(), "host_files", cfg.Upgrades.HostFilesVersion)
 
 	legacySlug := cfg.Instances[0].Slug
 	for _, ic := range cfg.Instances {
@@ -180,7 +200,7 @@ func run() error {
 	}
 	go reporter.Run(ctx)
 
-	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc)
+	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg)
 
 	go fleet.RunHealthWatch(ctx, 15*time.Second, func(slug string, health obs.Health) {
 		h.Notify(hub.InstanceHealth(map[string]any{"slug": slug, "health": health}))

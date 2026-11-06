@@ -13,6 +13,7 @@ import (
 	"github.com/percona/obs-dashboard/internal/auth"
 	"github.com/percona/obs-dashboard/internal/hub"
 	"github.com/percona/obs-dashboard/internal/obs"
+	"github.com/percona/obs-dashboard/internal/upgrade"
 )
 
 // stripCallbackQuery keeps the OAuth code/state out of request logs: chi's
@@ -38,7 +39,7 @@ type PresenceGate interface {
 
 // NewRouter creates the chi router with all API routes registered. authSvc
 // gates state-changing routes; reads stay public.
-func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service) http.Handler {
+func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager) http.Handler {
 	r := chi.NewRouter()
 	r.Use(stripCallbackQuery)
 	r.Use(middleware.Logger)
@@ -98,6 +99,15 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 		r.Post("/api/telemetry", telemetrySetHandler(telemetryEnabled))
 	})
 
+	// Upgrades are an admin matter: even reads need a signed-in user.
+	if upg != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authSvc.RequireUser)
+			r.Get("/api/upgrades", upgradesListHandler(upg))
+			r.With(authSvc.CheckOrigin).Post("/api/upgrades/check", upgradesCheckHandler(upg))
+			r.With(authSvc.CheckOrigin).Post("/api/upgrades/{version}/apply", upgradesApplyHandler(upg))
+		})
+	}
 	return r
 }
 

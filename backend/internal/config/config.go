@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type Config struct {
 	Unblocker  UnblockerConfig
 	Idle       IdleConfig
 	Auth       AuthConfig
+	Upgrades   UpgradesConfig
 	// Instances lists every OBS instance the dashboard reads from, in config
 	// order. Always at least one (the legacy instance when obs_instances is
 	// absent).
@@ -318,6 +320,8 @@ func Load() (*Config, error) {
 	v.SetDefault("idle.enabled", true)
 	v.SetDefault("idle.linger", "5m")
 	v.SetDefault("auth.session_ttl", "168h")
+	v.SetDefault("upgrades.github_repo", "Percona-Lab/obs-dashboard")
+	v.SetDefault("upgrades.check_interval", "1h")
 
 	// Config file (optional)
 	cfgFile := "config.yaml"
@@ -355,6 +359,8 @@ func Load() (*Config, error) {
 		{"idle.linger", "IDLE_LINGER"},
 		{"auth.public_url", "AUTH_PUBLIC_URL"},
 		{"auth.session_ttl", "AUTH_SESSION_TTL"},
+		{"upgrades.github_repo", "UPGRADES_GITHUB_REPO"},
+		{"upgrades.check_interval", "UPGRADES_CHECK_INTERVAL"},
 	} {
 		_ = v.BindEnv(pair[0], pair[1])
 	}
@@ -453,6 +459,12 @@ func Load() (*Config, error) {
 	}
 	cfg.Auth = authCfg
 
+	upgradesCfg, err := loadUpgrades(v)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Upgrades = upgradesCfg
+
 	return cfg, nil
 }
 
@@ -466,4 +478,34 @@ func parseRetention(s string) (time.Duration, error) {
 		return time.Duration(days) * 24 * time.Hour, nil
 	}
 	return time.ParseDuration(s)
+}
+
+// UpgradesConfig configures release checks and UI-applied upgrades.
+type UpgradesConfig struct {
+	GitHubRepo       string
+	CheckInterval    time.Duration
+	ApplyDir         string // UPGRADE_APPLY_DIR; empty disables applying
+	HostFilesVersion string // OBS_DASHBOARD_HOST_FILES_VERSION
+}
+
+var repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+func loadUpgrades(v *viper.Viper) (UpgradesConfig, error) {
+	interval, err := time.ParseDuration(v.GetString("upgrades.check_interval"))
+	if err != nil {
+		return UpgradesConfig{}, fmt.Errorf("invalid UPGRADES_CHECK_INTERVAL %q: %w", v.GetString("upgrades.check_interval"), err)
+	}
+	if interval < 5*time.Minute {
+		return UpgradesConfig{}, fmt.Errorf("upgrades.check_interval must be at least 5m, got %s", interval)
+	}
+	repo := strings.TrimSpace(v.GetString("upgrades.github_repo"))
+	if !repoRe.MatchString(repo) {
+		return UpgradesConfig{}, fmt.Errorf("upgrades.github_repo must be owner/name, got %q", repo)
+	}
+	return UpgradesConfig{
+		GitHubRepo:       repo,
+		CheckInterval:    interval,
+		ApplyDir:         strings.TrimSpace(os.Getenv("UPGRADE_APPLY_DIR")),
+		HostFilesVersion: strings.TrimSpace(os.Getenv("OBS_DASHBOARD_HOST_FILES_VERSION")),
+	}, nil
 }
