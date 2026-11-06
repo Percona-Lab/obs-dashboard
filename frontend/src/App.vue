@@ -7,6 +7,7 @@ import MainGrid from './components/MainGrid.vue'
 import ArtifactsPanel from './components/ArtifactsPanel.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import HostUpdateBanner from './components/HostUpdateBanner.vue'
 import type { Context } from './types/api'
 import type { WindowKey } from './types/overview'
 import { PPG_DEVEL_CONTEXT, PPG_STAGING_CONTEXT, RELEASES_CONTEXT, prArtifactsContexts } from './lib/contexts'
@@ -16,6 +17,7 @@ import { usePRPackages } from './composables/usePRPackages'
 import { useRealtimeStream } from './composables/useRealtimeStream'
 import { useUrlState, type MainTab } from './composables/useUrlState'
 import { usePresenceHeartbeat } from './composables/usePresenceHeartbeat'
+import { startUpgradeNotices, stopUpgradeNotices } from './composables/useUpgrades'
 import { useAuth, loadAuth, consumeAuthError, guardSettingsTab, dismissNotice } from './composables/useAuth'
 
 // Main tab (Overview is the default landing view)
@@ -31,6 +33,8 @@ const { notice, signedIn } = useAuth()
 consumeAuthError()
 void loadAuth()
 guardSettingsTab(mainTab)
+// Upgrade notices (header dot, host-update banner) are for signed-in users.
+watch(signedIn, (on) => (on ? startUpgradeNotices() : stopUpgradeNotices()), { immediate: true })
 
 // Theme
 // Default to the OS color scheme; a manual toggle is remembered in
@@ -250,6 +254,7 @@ watch(selectedContext, () => refresh())
         <span>{{ notice }}</span>
         <button class="[background:none] border-none cursor-pointer text-text-muted" aria-label="Dismiss" @click="dismissNotice">×</button>
       </div>
+      <HostUpdateBanner />
       <template v-if="mainTab === 'board'">
         <ContextBar
           :version="version"

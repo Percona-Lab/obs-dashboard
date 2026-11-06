@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { MainTab } from '../composables/useUrlState'
 import { useAuth, login, logout } from '../composables/useAuth'
+import { useUpgrades } from '../composables/useUpgrades'
+
+const { updateAvailable } = useUpgrades()
 
 defineProps<{
   theme: 'light' | 'dark'
@@ -56,6 +59,7 @@ async function onSignOut() {
         @click="emit('update:main-tab', 'settings')"
       >
         Settings
+        <span v-if="updateAvailable" data-testid="update-dot" class="ml-[6px] inline-block w-[7px] h-[7px] rounded-full bg-warn align-middle" aria-label="Update available"></span>
       </button>
     </div>
     <div class="shrink-0 flex items-center gap-2">
