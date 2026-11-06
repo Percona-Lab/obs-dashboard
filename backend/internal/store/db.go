@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_email ON sessions (email);
+
+CREATE TABLE IF NOT EXISTS upgrades (
+    version       TEXT PRIMARY KEY,
+    notes         TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    host_changes  TEXT NOT NULL DEFAULT '',
+    published_at  TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    requested_by  TEXT,
+    requested_at  TEXT,
+    finished_at   TEXT,
+    error         TEXT
+);
 `
 
 // columnExists reports whether table has a column named col.
