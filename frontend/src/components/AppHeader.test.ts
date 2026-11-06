@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AppHeader from './AppHeader.vue'
 import { useAuth, resetAuthForTests } from '../composables/useAuth'
+import { useUpgrades, resetUpgradesForTests } from '../composables/useUpgrades'
 
 function mountHeader() {
   return mount(AppHeader, { props: { theme: 'light', mainTab: 'overview' } })
@@ -34,5 +35,24 @@ describe('AppHeader auth controls', () => {
     const w = mountHeader()
     expect(w.find('[data-testid="sign-in"]').exists()).toBe(false)
     expect(w.find('[data-testid="sign-out"]').exists()).toBe(false)
+  })
+})
+
+describe('AppHeader update dot', () => {
+  beforeEach(() => resetUpgradesForTests())
+  const v = (status: 'available' | 'applied') => ({
+    current: 'v0.1.0', host_files_version: '', repo: 'Percona-Lab/obs-dashboard', apply_enabled: true, in_flight: '', checked_at: null,
+    releases: [{ version: 'v0.2.0', notes: '', url: '', published_at: '', status, requested_by: '', requested_at: null, finished_at: null, error: '', host_changes: '', requires_host: '', blocked: false, host_instructions: [] }],
+  })
+  it('shows a dot on Settings when a release is available', () => {
+    useAuth().user.value = 'alice@percona.com'
+    useAuth().authEnabled.value = true
+    useUpgrades().view.value = v('available')
+    expect(mountHeader().find('[data-testid="update-dot"]').exists()).toBe(true)
+  })
+  it('shows no dot when nothing is available', () => {
+    useAuth().user.value = 'alice@percona.com'
+    useUpgrades().view.value = v('applied')
+    expect(mountHeader().find('[data-testid="update-dot"]').exists()).toBe(false)
   })
 })
