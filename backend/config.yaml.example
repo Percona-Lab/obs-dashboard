@@ -105,9 +105,15 @@ idle:
 auth:
   # Where the dashboard is served. Used for the OAuth redirect
   # (<public_url>/auth/callback) and to check the Origin of actions.
-  # Env: AUTH_PUBLIC_URL. Local dev: http://localhost:5173
+  # Scheme and host only (no path). Env: AUTH_PUBLIC_URL.
+  # Required once GOOGLE_CLIENT_ID is set, along with GOOGLE_CLIENT_SECRET.
+  # EXAMPLE (production value). For local development override it in .env
+  # with AUTH_PUBLIC_URL=http://localhost:5173 (the Vite dev server); the
+  # production value would redirect sign-in to the production callback and
+  # make every action fail with 403.
   public_url: "https://dashboard.obs.pg.labs.percona.com"
   # Always allowed, cannot be removed from the Settings page. Also from the
   # comma-separated env var OBS_DASHBOARD_ADMINS.
   admins: []
+  # How long a sign-in lasts. Env: AUTH_SESSION_TTL.
   session_ttl: "168h"
