@@ -6,6 +6,7 @@ import HealthHeader from './components/HealthHeader.vue'
 import MainGrid from './components/MainGrid.vue'
 import ArtifactsPanel from './components/ArtifactsPanel.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 import type { Context } from './types/api'
 import type { WindowKey } from './types/overview'
 import { PPG_DEVEL_CONTEXT, PPG_STAGING_CONTEXT, RELEASES_CONTEXT, prArtifactsContexts } from './lib/contexts'
@@ -15,13 +16,21 @@ import { usePRPackages } from './composables/usePRPackages'
 import { useRealtimeStream } from './composables/useRealtimeStream'
 import { useUrlState, type MainTab } from './composables/useUrlState'
 import { usePresenceHeartbeat } from './composables/usePresenceHeartbeat'
+import { useAuth, loadAuth, consumeAuthError, guardSettingsTab, dismissNotice } from './composables/useAuth'
 
 // Main tab (Overview is the default landing view)
 const mainTab = ref<MainTab>('overview')
 
 // Heartbeats drive the backend's idle-mode gate: only Builds/Artifacts
 // viewers need live OBS polling (Overview stays fresh via MQ events).
-usePresenceHeartbeat(computed(() => mainTab.value !== 'overview'))
+usePresenceHeartbeat(computed(() => mainTab.value === 'board' || mainTab.value === 'artifacts'))
+
+// Auth: report a failed sign-in redirect, load the session, and keep
+// signed-out visitors off Settings.
+const { notice } = useAuth()
+consumeAuthError()
+void loadAuth()
+guardSettingsTab(mainTab)
 
 // Theme
 // Default to the OS color scheme; a manual toggle is remembered in
@@ -233,6 +242,14 @@ watch(selectedContext, () => refresh())
   <div class="min-h-screen bg-bg-app pt-6 px-4 sm:px-7 pb-[60px]">
     <div class="max-w-[1360px] mx-auto flex flex-col gap-4">
       <AppHeader :theme="theme" :main-tab="mainTab" @toggle-theme="toggleTheme" @update:main-tab="mainTab = $event" />
+      <div
+        v-if="notice"
+        role="status"
+        class="flex items-center justify-between gap-3 px-4 py-2 rounded-[10px] border border-border bg-bg-card text-[13px] text-text-secondary"
+      >
+        <span>{{ notice }}</span>
+        <button class="[background:none] border-none cursor-pointer text-text-muted" aria-label="Dismiss" @click="dismissNotice">×</button>
+      </div>
       <template v-if="mainTab === 'board'">
         <ContextBar
           :version="version"
@@ -278,6 +295,7 @@ watch(selectedContext, () => refresh())
         :overview-window="overviewWindow"
         @update:overview-window="overviewWindow = $event"
       />
+      <SettingsPanel v-else-if="mainTab === 'settings'" />
     </div>
   </div>
 </template>

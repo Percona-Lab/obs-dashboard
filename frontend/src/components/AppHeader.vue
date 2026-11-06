@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { MainTab } from '../composables/useUrlState'
+import { useAuth, login, logout } from '../composables/useAuth'
 
 defineProps<{
   theme: 'light' | 'dark'
@@ -9,6 +10,12 @@ const emit = defineEmits<{
   'toggle-theme': []
   'update:main-tab': [tab: MainTab]
 }>()
+const { user, authEnabled, signedIn } = useAuth()
+
+async function onSignOut() {
+  await logout()
+  emit('update:main-tab', 'overview')
+}
 </script>
 
 <template>
@@ -41,14 +48,32 @@ const emit = defineEmits<{
       >
         Artifacts
       </button>
+      <button
+        v-if="signedIn"
+        data-testid="settings-tab"
+        class="tab-pill"
+        :class="{ active: mainTab === 'settings' }"
+        @click="emit('update:main-tab', 'settings')"
+      >
+        Settings
+      </button>
     </div>
-    <button
-      @click="emit('toggle-theme')"
-      class="shrink-0 inline-flex items-center gap-2 px-[14px] py-2 rounded-[10px] border border-border bg-bg-card text-text-secondary [font-family:inherit] text-[13px] font-semibold cursor-pointer"
-    >
-      <span class="w-2 h-2 rounded-full bg-brand-purple"></span>
-      <span class="hidden sm:inline">{{ theme === 'dark' ? 'Dark' : 'Light' }} mode</span>
-    </button>
+    <div class="shrink-0 flex items-center gap-2">
+      <template v-if="authEnabled">
+        <template v-if="signedIn">
+          <span data-testid="user-email" class="hidden md:inline text-[12.5px] text-text-muted font-mono truncate max-w-[220px]">{{ user }}</span>
+          <button data-testid="sign-out" class="auth-btn" @click="onSignOut">Sign out</button>
+        </template>
+        <button v-else data-testid="sign-in" class="auth-btn" @click="login">Sign in</button>
+      </template>
+      <button
+        @click="emit('toggle-theme')"
+        class="shrink-0 inline-flex items-center gap-2 px-[14px] py-2 rounded-[10px] border border-border bg-bg-card text-text-secondary [font-family:inherit] text-[13px] font-semibold cursor-pointer"
+      >
+        <span class="w-2 h-2 rounded-full bg-brand-purple"></span>
+        <span class="hidden sm:inline">{{ theme === 'dark' ? 'Dark' : 'Light' }} mode</span>
+      </button>
+    </div>
   </header>
 </template>
 
@@ -64,5 +89,9 @@ const emit = defineEmits<{
 
 .tab-pill.active {
   @apply bg-bg-card text-brand-purple border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.12)];
+}
+.auth-btn {
+  @apply inline-flex items-center px-[12px] py-2 rounded-[10px] border border-border bg-bg-card text-text-secondary text-[13px] font-semibold cursor-pointer;
+  font-family: inherit;
 }
 </style>
