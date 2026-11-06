@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { handleUnauthorized } from './useAuth'
 
 export function useRebuild() {
   const loadingMap = ref(new Map<string, boolean>())
@@ -39,6 +40,10 @@ export function useRebuild() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project, repo, arch, package: pkg }),
       })
+      if (res.status === 401) {
+        handleUnauthorized()
+        return
+      }
       if (!res.ok) {
         let msg = `HTTP ${res.status}`
         try {

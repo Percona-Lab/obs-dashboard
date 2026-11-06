@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { Package, Target } from '../types/api'
 import { displayVersion, TAG_LABEL } from '../composables/useEventDisplay'
 import { useRebuild } from '../composables/useRebuild'
+import { useAuth } from '../composables/useAuth'
 import { isTarballRepo } from '../lib/tarballs'
 import { useInstances } from '../composables/useInstances'
 import { packageUrl, liveLogUrl } from '../lib/instances'
@@ -20,6 +21,7 @@ const isTarball = computed(() =>
 )
 
 const { trigger: triggerRebuild, isLoading: isRebuildLoading, errorFor: rebuildErrorFor } = useRebuild()
+const { signedIn } = useAuth()
 
 const SKIP_STATES = new Set(['disabled', 'excluded', 'locked'])
 const REBUILD_STATES = new Set(['failed', 'broken', 'unresolvable', 'blocked'])
@@ -292,7 +294,7 @@ const isDimmed = computed(() => !!props.spotlightStates?.length && !props.spotli
               @click.stop
             >log ↗</a>
             <button
-              v-if="REBUILD_STATES.has(t.state)"
+              v-if="signedIn && REBUILD_STATES.has(t.state)"
               :disabled="isRebuildLoading(t.repo, t.arch)"
               class="[background:none] border-none px-[2px] text-[13px] flex-shrink-0 leading-none"
               :style="{ cursor: isRebuildLoading(t.repo, t.arch) ? 'default' : 'pointer', color: 'var(--text-muted)' }"
