@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS metrics_samples (
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_samples_ts ON metrics_samples (ts);
+
+CREATE TABLE IF NOT EXISTS allowed_users (
+    email    TEXT PRIMARY KEY,
+    added_by TEXT NOT NULL,
+    added_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id         TEXT PRIMARY KEY,
+    email      TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_email ON sessions (email);
 `
 
 // columnExists reports whether table has a column named col.
