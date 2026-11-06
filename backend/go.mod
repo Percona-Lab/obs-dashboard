@@ -1,6 +1,6 @@
 module github.com/percona/obs-dashboard
 
-go 1.26.0
+go 1.25.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
@@ -9,7 +9,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/rabbitmq/amqp091-go v1.11.0
 	github.com/spf13/viper v1.21.0
-	golang.org/x/oauth2 v0.37.0
+	golang.org/x/oauth2 v0.36.0
 	modernc.org/sqlite v1.52.0
 )
 
