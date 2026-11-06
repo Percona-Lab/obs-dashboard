@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/percona/obs-dashboard/internal/api"
+	"github.com/percona/obs-dashboard/internal/auth"
 	"github.com/percona/obs-dashboard/internal/config"
 	"github.com/percona/obs-dashboard/internal/cve"
 	"github.com/percona/obs-dashboard/internal/hub"
@@ -153,7 +155,27 @@ func run() error {
 	}
 	go reporter.Run(ctx)
 
-	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate)
+	var provider *auth.Provider
+	if cfg.Auth.Enabled() {
+		provider, err = auth.NewGoogleProvider(ctx, cfg.Auth.GoogleClientID, cfg.Auth.GoogleClientSecret, cfg.Auth.PublicURL+"/auth/callback")
+		if err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+		slog.Info("auth: Google sign-in enabled", "public_url", cfg.Auth.PublicURL, "admins", len(cfg.Auth.Admins))
+	} else {
+		slog.Info("auth: GOOGLE_CLIENT_ID not set; sign-in disabled and actions unavailable")
+	}
+	authSvc := auth.NewService(db, auth.Options{
+		Provider:   provider,
+		PublicURL:  cfg.Auth.PublicURL,
+		Admins:     cfg.Auth.Admins,
+		SessionTTL: cfg.Auth.SessionTTL,
+	})
+	if err := authSvc.PruneExpired(); err != nil {
+		slog.Warn("auth: prune expired sessions", "err", err)
+	}
+
+	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc)
 
 	go fleet.RunHealthWatch(ctx, 15*time.Second, func(slug string, health obs.Health) {
 		h.Notify(hub.InstanceHealth(map[string]any{"slug": slug, "health": health}))
@@ -163,7 +185,7 @@ func run() error {
 	if cfg.Server.FrontendDir != "" {
 		fs := http.FileServer(http.Dir(cfg.Server.FrontendDir))
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if len(r.URL.Path) >= 4 && r.URL.Path[:4] == "/api" {
+			if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/auth/") {
 				router.ServeHTTP(w, r)
 			} else {
 				fs.ServeHTTP(w, r)
