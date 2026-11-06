@@ -27,7 +27,7 @@ usePresenceHeartbeat(computed(() => mainTab.value === 'board' || mainTab.value =
 
 // Auth: report a failed sign-in redirect, load the session, and keep
 // signed-out visitors off Settings.
-const { notice } = useAuth()
+const { notice, signedIn } = useAuth()
 consumeAuthError()
 void loadAuth()
 guardSettingsTab(mainTab)
@@ -295,7 +295,7 @@ watch(selectedContext, () => refresh())
         :overview-window="overviewWindow"
         @update:overview-window="overviewWindow = $event"
       />
-      <SettingsPanel v-else-if="mainTab === 'settings'" />
+      <SettingsPanel v-else-if="mainTab === 'settings' && signedIn" />
     </div>
   </div>
 </template>
