@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/percona/obs-dashboard/internal/auth"
 	"github.com/percona/obs-dashboard/internal/hub"
 	"github.com/percona/obs-dashboard/internal/obs"
 )
@@ -20,8 +21,9 @@ type PresenceGate interface {
 	PollState
 }
 
-// NewRouter creates the chi router with all API routes registered.
-func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate) http.Handler {
+// NewRouter creates the chi router with all API routes registered. authSvc
+// gates state-changing routes; reads stay public.
+func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -32,6 +34,8 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 			next.ServeHTTP(w, req.WithContext(obs.Interactive(req.Context())))
 		})
 	})
+	r.Use(authSvc.LoadUser)
+	authSvc.Mount(r)
 	releaseArtifacts := newReleaseArtifactsCache(10 * time.Minute)
 	metadataCache := newBinaryListCache(5 * time.Minute)
 	overview := newOverviewCache(60 * time.Second)
@@ -58,19 +62,24 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 
 	r.Get("/api/stream", streamHandler(h))
 	r.Get("/api/binaries", binariesHandler(fleet))
-	r.Post("/api/rebuild", rebuildHandler(fleet))
 	r.Post("/api/artifacts/metadata", artifactMetadataHandler(fleet, metadataCache))
 
 	r.Get("/api/instances", instancesHandler(fleet))
 
 	r.Get("/api/telemetry", telemetryStatusHandler(telemetryEnabled, telemetryInterval))
-	r.Post("/api/telemetry", telemetrySetHandler(telemetryEnabled))
 	r.Post("/api/presence", presenceHandler(gate))
 
 	r.Get("/api/metrics", metricsHandler(fleet, ws, h, db, gate))
 
 	r.Get("/api/overview", overviewHandler(db, fleet.Default().Slug, overview))
 	r.Get("/api/cve/scans", cveScansHandler(db))
+
+	// State-changing actions: signed-in, allowlisted users only.
+	r.Group(func(r chi.Router) {
+		r.Use(authSvc.RequireUser, authSvc.CheckOrigin)
+		r.Post("/api/rebuild", rebuildHandler(fleet))
+		r.Post("/api/telemetry", telemetrySetHandler(telemetryEnabled))
+	})
 
 	return r
 }
