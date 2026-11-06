@@ -50,6 +50,11 @@ describe('AppHeader update dot', () => {
     useUpgrades().view.value = v('available')
     expect(mountHeader().find('[data-testid="update-dot"]').exists()).toBe(true)
   })
+  it('shows no dot when applying is not enabled', () => {
+    useAuth().user.value = 'alice@percona.com'
+    useUpgrades().view.value = { ...v('available'), apply_enabled: false }
+    expect(mountHeader().find('[data-testid="update-dot"]').exists()).toBe(false)
+  })
   it('shows no dot when nothing is available', () => {
     useAuth().user.value = 'alice@percona.com'
     useUpgrades().view.value = v('applied')

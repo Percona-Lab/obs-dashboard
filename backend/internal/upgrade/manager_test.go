@@ -289,6 +289,23 @@ func TestHostRequirement(t *testing.T) {
 	}
 }
 
+func TestNoApplyNeverBlocked(t *testing.T) {
+	for name, mod := range map[string]func(*Options){
+		"dev build":    func(o *Options) { o.Current = "dev" },
+		"no apply dir": func(o *Options) { o.ApplyDir = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, "v0.1.0", func(o *Options) { o.HostFilesVersion = ""; mod(o) })
+			h.src.rels = []Release{rel("v0.2.0", "add FOO")}
+			_ = h.m.Check(context.Background())
+			v := h.view(t)
+			if len(v.Releases) != 1 || v.Releases[0].Blocked || v.Releases[0].RequiresHost != "v0.2.0" || len(v.Releases[0].HostInstructions) != 1 {
+				t.Fatalf("view = %+v", v.Releases)
+			}
+		})
+	}
+}
+
 func TestApplyBlockedByHost(t *testing.T) {
 	h := newHarness(t, "v0.1.0", nil)
 	h.src.rels = []Release{rel("v0.2.0", "add FOO")}

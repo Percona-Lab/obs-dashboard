@@ -2327,6 +2327,7 @@ describe('hostUpdateCommands', () => {
     expect(c).toContain('OBS_DASHBOARD_HOST_FILES_VERSION=v0.3.0')
     expect(c).toContain('systemctl restart obs-dashboard')
     expect(c.startsWith('cd "$(mktemp -d)"')).toBe(true)
+    expect(c.endsWith('systemctl restart obs-dashboard')).toBe(true)
   })
 })
 

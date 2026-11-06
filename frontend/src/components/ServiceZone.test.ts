@@ -44,11 +44,11 @@ async function mounted() {
 
 describe('ServiceZone', () => {
   it('shows the current version, releases with notes, and history', async () => {
-    handler = () => json(view({ releases: [release({}), release({ version: 'v0.0.9', status: 'failed', error: 'rolled back', finished_at: '2026-11-01T10:00:00Z' })] }))
+    handler = () => json(view({ releases: [release({}), release({ version: 'v0.1.5', status: 'failed', error: 'rolled back', finished_at: '2026-11-01T10:00:00Z' })] }))
     const w = await mounted()
     expect(w.find('[data-testid="current-version"]').text()).toBe('v0.1.0')
-    expect(w.findAll('[data-testid="release-row"]')).toHaveLength(1)
-    expect(w.find('[data-testid="notes"]').text()).toBe('Fixed things')
+    expect(w.findAll('[data-testid="release-row"]')).toHaveLength(2)
+    expect(w.findAll('[data-testid="notes"]')[0].text()).toBe('Fixed things')
     const hist = w.findAll('[data-testid="history-row"]')
     expect(hist).toHaveLength(1)
     expect(hist[0].text()).toContain('rolled back')
@@ -109,6 +109,22 @@ describe('ServiceZone', () => {
     expect(w.find('[data-testid="host-instruction"]').text()).toContain('Add FOO=1')
     expect(w.find('[data-testid="host-commands"]').text()).toContain('obs-dashboard-host-v0.3.0.tar.gz')
     expect(w.find('[data-testid="host-files-version"]').text()).toContain('unknown')
+  })
+
+  it('offers Retry on a failed release and POSTs apply', async () => {
+    handler = () => json(view({ releases: [release({ status: 'failed', error: 'health check timed out' })] }))
+    const w = await mounted()
+    expect(w.find('[data-testid="failed-error"]').text()).toContain('health check timed out')
+    const btn = w.find('[data-testid="upgrade"]')
+    expect(btn.text()).toBe('Retry')
+    handler = (url, init) => {
+      if (url.endsWith('/apply') && init?.method === 'POST') return json(release({ status: 'applying' }), 202)
+      return json(view({ in_flight: 'v0.2.0', releases: [release({ status: 'applying' })] }))
+    }
+    await btn.trigger('click')
+    await w.find('[data-testid="confirm"]').trigger('click')
+    await flushPromises()
+    expect(fetchFn.mock.calls.some(([u, i]) => u === '/api/upgrades/v0.2.0/apply' && i?.method === 'POST')).toBe(true)
   })
 
   it('reports a failed check', async () => {

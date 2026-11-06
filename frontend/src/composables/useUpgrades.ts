@@ -42,10 +42,12 @@ const view = ref<UpgradesView | null>(null)
 const loadError = ref<string | null>(null)
 let noticeTimer: ReturnType<typeof setInterval> | undefined
 
-const updateAvailable = computed(() => view.value?.releases.some((r) => r.status === 'available') ?? false)
+// Deployments without UI upgrades (apply_enabled=false) never show update notices.
+const updateAvailable = computed(() => (view.value?.apply_enabled ?? false) && view.value!.releases.some((r) => r.status === 'available'))
 // The newest available release, when it needs a host update first.
 const blockedRelease = computed<ReleaseView | null>(() => {
-  const newest = view.value?.releases.find((r) => r.status === 'available')
+  if (!view.value?.apply_enabled) return null
+  const newest = view.value.releases.find((r) => r.status === 'available')
   return newest && newest.blocked ? newest : null
 })
 
