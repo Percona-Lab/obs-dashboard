@@ -121,12 +121,50 @@ case_rollback_fails() {
   ok "one status" one_status && ok "rollback failed" grep -q 'rollback failed' <<<"$(st .error)"
 }
 
+case_restore_symlink() {
+  echo secret >"$T/outside"
+  ln -s "$T/outside" "$DATA_DIR/obsboard.db.restore"
+  ln -s "$T/outside" "$DATA_DIR/.obsboard.db.restore"
+  export STUB_HEALTH=baddead STUB_BAD_VERSION=v0.2.0
+  request v0.2.0 "$BACKUP"
+  run_apply
+  assert_rolled_back &&
+    ok "symlink target unchanged" [ "$(cat "$T/outside")" = secret ]
+}
+
+case_backup_symlink() {
+  echo secret >"$T/outside"
+  rm -f "$DATA_DIR/backups/$BACKUP"
+  ln -s "$T/outside" "$DATA_DIR/backups/$BACKUP"
+  request v0.2.0 "$BACKUP"
+  run_apply
+  ok "one status" one_status &&
+    ok "ok=false" [ "$(st .ok)" = false ] &&
+    ok "error mentions backup" grep -q 'backup' <<<"$(st .error)" &&
+    ok "no podman" bash -c "! grep -q podman '$STUB_CALLS'" &&
+    ok "pin unchanged" [ "$(pin)" = v0.1.0 ]
+}
+
+case_backups_dir_symlink() {
+  mkdir "$T/elsewhere"
+  mv "$DATA_DIR/backups/$BACKUP" "$T/elsewhere/$BACKUP"
+  rmdir "$DATA_DIR/backups"
+  ln -s "$T/elsewhere" "$DATA_DIR/backups"
+  request v0.2.0 "$BACKUP"
+  run_apply
+  ok "one status" one_status &&
+    ok "ok=false" [ "$(st .ok)" = false ] &&
+    ok "error mentions backup" grep -q 'backup' <<<"$(st .error)" &&
+    ok "no podman" bash -c "! grep -q podman '$STUB_CALLS'" &&
+    ok "pin unchanged" [ "$(pin)" = v0.1.0 ]
+}
+
 case_no_request() {
   run_apply
   ok "no status" [ ! -e "$APPLY_DIR/apply-status" ]
 }
 
-for c in success invalid_version backup_traversal missing_backup pull_failure health_timeout wrong_version rollback_fails no_request; do
+for c in success invalid_version backup_traversal missing_backup pull_failure health_timeout wrong_version rollback_fails restore_symlink backup_symlink backups_dir_symlink no_request; do
   setup
   if "case_$c"; then
     pass=$((pass + 1))
