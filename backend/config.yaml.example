@@ -97,3 +97,17 @@ idle:
   # Go idle after this long without a heartbeat (also the post-restart
   # grace window before the first possible pause).
   linger: 5m
+
+# Google sign-in. Reads stay public; actions such as Rebuild need a
+# signed-in, allowlisted @percona.com account. Sign-in is enabled only when
+# GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set in the environment;
+# without them the dashboard is read-only.
+auth:
+  # Where the dashboard is served. Used for the OAuth redirect
+  # (<public_url>/auth/callback) and to check the Origin of actions.
+  # Env: AUTH_PUBLIC_URL. Local dev: http://localhost:5173
+  public_url: "https://dashboard.obs.pg.labs.percona.com"
+  # Always allowed, cannot be removed from the Settings page. Also from the
+  # comma-separated env var OBS_DASHBOARD_ADMINS.
+  admins: []
+  session_ttl: "168h"

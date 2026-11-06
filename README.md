@@ -52,6 +52,29 @@ Copy `.env.example` for a pre-filled template.
 file-based config or need to set fields not exposed as env vars (e.g. `obs_root`).
 The file is read on startup; environment variables override any value it contains.
 
+## Authentication
+
+Anyone can view the dashboard. Actions that change state (Rebuild, the
+telemetry toggle) require signing in with an allowlisted `@percona.com`
+Google account.
+
+1. In Google Cloud Console → APIs & Services → Credentials, create an
+   OAuth client of type **Web application** with these authorized redirect
+   URIs:
+   - `https://dashboard.obs.pg.labs.percona.com/auth/callback`
+   - `http://localhost:5173/auth/callback` (local dev)
+2. Set in `.env` (single-quote values that contain `$`):
+   - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+   - `OBS_DASHBOARD_ADMINS` — comma-separated emails that are always allowed
+3. Set `auth.public_url` in `config.yaml` (or `AUTH_PUBLIC_URL`) to the URL
+   the dashboard is served from. Sign-in only works from that host.
+
+Admins and anyone they add can manage the allowlist on the **Settings** tab.
+Removing someone ends their sessions immediately.
+
+Without `GOOGLE_CLIENT_ID` the dashboard runs read-only: there is no Sign in
+button and action endpoints return 401.
+
 ## Development
 
 ```sh
