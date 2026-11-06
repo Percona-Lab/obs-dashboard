@@ -114,3 +114,22 @@ jobs:
       - name: Tear down prod stack
         if: always()
         run: docker compose -f docker-compose.prod.yml down -v
+
+  host-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck deploy/host/apply.sh deploy/host/test/*.sh deploy/host/test/stubs/*
+
+      - name: Verify systemd units
+        run: |
+          sudo install -D -m 0755 deploy/host/apply.sh /usr/local/lib/obs-dashboard/apply.sh
+          systemd-analyze verify deploy/host/obs-dashboard-apply.path deploy/host/obs-dashboard-apply.service
+
+      - name: Verify Quadlet unit
+        run: deploy/host/test/quadlet-check.sh
+
+      - name: Apply script tests
+        run: deploy/host/test/run.sh

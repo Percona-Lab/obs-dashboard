@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test stub for the /healthz probe. STUB_HEALTH: ok (default), baddead (the
+# STUB_BAD_VERSION never answers), badwrong (it reports v0.0.1).
+echo "curl $*" >>"$STUB_CALLS"
+[[ -s $STUB_DIR/running ]] || exit 7
+v=$(cat "$STUB_DIR/running")
+if [[ $v == "${STUB_BAD_VERSION:-}" ]]; then
+  case ${STUB_HEALTH:-ok} in
+    baddead) exit 7 ;;
+    badwrong) v=v0.0.1 ;;
+  esac
+fi
+printf '{"status":"ok","version":"%s"}\n' "$v"

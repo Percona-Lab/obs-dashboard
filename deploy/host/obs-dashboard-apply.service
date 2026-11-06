@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply a requested obs-dashboard upgrade
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/lib/obs-dashboard/apply.sh
+TimeoutStartSec=900
