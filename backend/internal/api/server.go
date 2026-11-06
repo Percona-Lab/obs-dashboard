@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -13,6 +14,20 @@ import (
 	"github.com/percona/obs-dashboard/internal/hub"
 	"github.com/percona/obs-dashboard/internal/obs"
 )
+
+// stripCallbackQuery keeps the OAuth code/state out of request logs: chi's
+// Logger prints RequestURI, so for /auth/callback it is cut to the path.
+// URL.RawQuery is untouched, so handlers still read the query.
+func stripCallbackQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/auth/callback") {
+			r2 := r.Clone(r.Context())
+			r2.RequestURI = r.URL.Path
+			r = r2
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // PresenceGate is what the router needs from the idle-mode gate:
 // heartbeats in, polling state out.
@@ -25,6 +40,7 @@ type PresenceGate interface {
 // gates state-changing routes; reads stay public.
 func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service) http.Handler {
 	r := chi.NewRouter()
+	r.Use(stripCallbackQuery)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	// All API requests are user-initiated: they bypass the OBS client's

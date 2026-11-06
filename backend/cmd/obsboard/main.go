@@ -51,6 +51,30 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Built before any background goroutine starts: a failed or hanging
+	// Google discovery aborts startup before any OBS traffic is generated.
+	var provider *auth.Provider
+	if cfg.Auth.Enabled() {
+		discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
+		provider, err = auth.NewGoogleProvider(discoverCtx, cfg.Auth.GoogleClientID, cfg.Auth.GoogleClientSecret, cfg.Auth.PublicURL+"/auth/callback")
+		discoverCancel()
+		if err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+		slog.Info("auth: Google sign-in enabled", "public_url", cfg.Auth.PublicURL, "admins", len(cfg.Auth.Admins))
+	} else {
+		slog.Info("auth: GOOGLE_CLIENT_ID not set; sign-in disabled and actions unavailable")
+	}
+	authSvc := auth.NewService(db, auth.Options{
+		Provider:   provider,
+		PublicURL:  cfg.Auth.PublicURL,
+		Admins:     cfg.Auth.Admins,
+		SessionTTL: cfg.Auth.SessionTTL,
+	})
+	if err := authSvc.PruneExpired(); err != nil {
+		slog.Warn("auth: prune expired sessions", "err", err)
+	}
+
 	legacySlug := cfg.Instances[0].Slug
 	for _, ic := range cfg.Instances {
 		if ic.Root == cfg.LegacyRoot {
@@ -154,26 +178,6 @@ func run() error {
 		Limiter:  fleet,
 	}
 	go reporter.Run(ctx)
-
-	var provider *auth.Provider
-	if cfg.Auth.Enabled() {
-		provider, err = auth.NewGoogleProvider(ctx, cfg.Auth.GoogleClientID, cfg.Auth.GoogleClientSecret, cfg.Auth.PublicURL+"/auth/callback")
-		if err != nil {
-			return fmt.Errorf("auth: %w", err)
-		}
-		slog.Info("auth: Google sign-in enabled", "public_url", cfg.Auth.PublicURL, "admins", len(cfg.Auth.Admins))
-	} else {
-		slog.Info("auth: GOOGLE_CLIENT_ID not set; sign-in disabled and actions unavailable")
-	}
-	authSvc := auth.NewService(db, auth.Options{
-		Provider:   provider,
-		PublicURL:  cfg.Auth.PublicURL,
-		Admins:     cfg.Auth.Admins,
-		SessionTTL: cfg.Auth.SessionTTL,
-	})
-	if err := authSvc.PruneExpired(); err != nil {
-		slog.Warn("auth: prune expired sessions", "err", err)
-	}
 
 	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc)
 

@@ -4,8 +4,10 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"time"
 )
@@ -108,15 +110,23 @@ func (s *Store) CreateSession(email string, now time.Time, ttl time.Duration) (s
 		return "", err
 	}
 	_, err = s.db.Exec(`INSERT INTO sessions (id, email, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-		id, email, ts(now), ts(now.Add(ttl)))
+		hashID(id), email, ts(now), ts(now.Add(ttl)))
 	if err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
+// hashID is what sessions.id stores: the cookie holds the raw token, so a
+// leaked database cannot be replayed as a session.
+func hashID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:])
+}
+
 // SessionEmail resolves an unexpired session. An expired row is deleted.
 func (s *Store) SessionEmail(id string, now time.Time) (string, bool, error) {
+	id = hashID(id)
 	var email, expires string
 	err := s.db.QueryRow(`SELECT email, expires_at FROM sessions WHERE id = ?`, id).Scan(&email, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -133,7 +143,7 @@ func (s *Store) SessionEmail(id string, now time.Time) (string, bool, error) {
 }
 
 func (s *Store) DeleteSession(id string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE id = ?`, hashID(id))
 	return err
 }
 

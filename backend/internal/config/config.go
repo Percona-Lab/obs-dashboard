@@ -187,9 +187,22 @@ func loadAuth(v *viper.Viper) (AuthConfig, error) {
 		return AuthConfig{}, fmt.Errorf("GOOGLE_CLIENT_SECRET is required when GOOGLE_CLIENT_ID is set")
 	}
 	u, err := url.Parse(a.PublicURL)
-	if a.PublicURL == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if a.PublicURL == "" || err != nil || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") || u.Host == "" {
 		return AuthConfig{}, fmt.Errorf("auth.public_url (or AUTH_PUBLIC_URL) must be an absolute http(s) URL when GOOGLE_CLIENT_ID is set, got %q", a.PublicURL)
 	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil || strings.ContainsAny(a.PublicURL, "?#") {
+		return AuthConfig{}, fmt.Errorf("auth.public_url (or AUTH_PUBLIC_URL) must be only scheme and host (no path, query, fragment or userinfo), got %q", a.PublicURL)
+	}
+	// Canonical form so it compares equal to the browser's Origin header.
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := u.Port(); port != "" && !(scheme == "https" && port == "443") && !(scheme == "http" && port == "80") {
+		host += ":" + port
+	}
+	a.PublicURL = scheme + "://" + host
 	return a, nil
 }
 
