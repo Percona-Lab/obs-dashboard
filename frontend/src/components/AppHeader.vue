@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import type { MainTab } from '../composables/useUrlState'
+
 defineProps<{
   theme: 'light' | 'dark'
-  mainTab: 'board' | 'artifacts' | 'overview'
+  mainTab: MainTab
 }>()
 const emit = defineEmits<{
   'toggle-theme': []
-  'update:main-tab': [tab: 'board' | 'artifacts' | 'overview']
+  'update:main-tab': [tab: MainTab]
 }>()
 </script>
 
