@@ -166,7 +166,9 @@ func (m *Manager) requirement(rows []Row, target string) (string, []HostInstruct
 }
 
 func (m *Manager) blocked(requires string) bool {
-	if requires == "" {
+	// Deployments without UI upgrades are never blocked: the host details stay
+	// informational.
+	if requires == "" || !m.ApplyEnabled() {
 		return false
 	}
 	hf := m.hostFiles()

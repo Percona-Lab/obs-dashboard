@@ -15,7 +15,7 @@ const actionError = ref<string | null>(null)
 const checking = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 
-const pending = computed(() => (view.value?.releases ?? []).filter((r) => r.status === 'available' || r.status === 'applying'))
+const pending = computed(() => (view.value?.releases ?? []).filter((r) => r.status === 'available' || r.status === 'applying' || r.status === 'failed'))
 const history = computed(() => (view.value?.releases ?? []).filter((r) => r.status === 'applied' || r.status === 'failed'))
 const busy = computed(() => phase.value === 'applying' || phase.value === 'restarting' || !!view.value?.in_flight)
 
@@ -130,8 +130,9 @@ function reload(): void {
             class="ml-auto px-[10px] py-[4px] rounded-[8px] border border-border-strong bg-bg-card text-brand-purple text-[12px] font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-default"
             :disabled="!view?.apply_enabled || busy || r.blocked"
             @click="confirming = r.version"
-          >{{ r.blocked ? 'Host update required' : 'Upgrade' }}</button>
+          >{{ r.blocked ? 'Host update required' : r.status === 'failed' ? 'Retry' : 'Upgrade' }}</button>
         </div>
+        <div v-if="r.status === 'failed' && r.error" data-testid="failed-error" class="text-[12.5px] text-fail">Last attempt failed: {{ r.error }}</div>
         <div v-if="r.blocked && view" data-testid="blocked-note" class="rounded-[8px] border border-warn bg-warn-tint p-3">
           <HostUpdateSteps :release="r" :repo="view.repo" :host-files-version="view.host_files_version" />
         </div>

@@ -159,12 +159,25 @@ case_backups_dir_symlink() {
     ok "pin unchanged" [ "$(pin)" = v0.1.0 ]
 }
 
+case_request_symlink() {
+  printf '{"version":"v9.9.9","backup":"secret"}\n' >"$T/outside.json"
+  ln -s "$T/outside.json" "$APPLY_DIR/apply-request"
+  run_apply
+  ok "one status" one_status &&
+    ok "ok=false" [ "$(st .ok)" = false ] &&
+    ok "error mentions symlink" grep -q 'symlink' <<<"$(st .error)" &&
+    ok "version not from link" [ "$(st .version)" != v9.9.9 ] &&
+    ok "no podman" bash -c "! grep -q podman '$STUB_CALLS'" &&
+    ok "pin unchanged" [ "$(pin)" = v0.1.0 ] &&
+    ok "link target untouched" grep -q v9.9.9 "$T/outside.json"
+}
+
 case_no_request() {
   run_apply
   ok "no status" [ ! -e "$APPLY_DIR/apply-status" ]
 }
 
-for c in success invalid_version backup_traversal missing_backup pull_failure health_timeout wrong_version rollback_fails restore_symlink backup_symlink backups_dir_symlink no_request; do
+for c in success invalid_version backup_traversal missing_backup pull_failure health_timeout wrong_version rollback_fails restore_symlink backup_symlink backups_dir_symlink request_symlink no_request; do
   setup
   if "case_$c"; then
     pass=$((pass + 1))

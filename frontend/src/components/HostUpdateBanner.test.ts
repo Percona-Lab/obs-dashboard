@@ -35,6 +35,12 @@ describe('HostUpdateBanner', () => {
     setView([rel({})])
     expect(mount(HostUpdateBanner).find('[data-testid="host-update-banner"]').exists()).toBe(false)
   })
+  it('is hidden when applying is not enabled', () => {
+    useAuth().user.value = 'alice@percona.com'
+    setView([rel({})])
+    useUpgrades().view.value!.apply_enabled = false
+    expect(mount(HostUpdateBanner).find('[data-testid="host-update-banner"]').exists()).toBe(false)
+  })
   it('is hidden when the newest release is not blocked', () => {
     useAuth().user.value = 'alice@percona.com'
     setView([rel({ blocked: false }), rel({ version: 'v0.2.0' })])

@@ -33,12 +33,19 @@ every GitHub release as `obs-dashboard-host-vX.Y.Z.tar.gz`, with a
 
 ```sh
 AUTH_PUBLIC_URL=https://dashboard.example.com
-OBS_DASHBOARD_HOST_FILES_VERSION=vX.Y.Z   # the host-files version installed
+# the host-files version installed
+OBS_DASHBOARD_HOST_FILES_VERSION=vX.Y.Z
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 OBS_DASHBOARD_ADMINS=someone@percona.com
 # plus per-instance OBS credentials, e.g. OBS_<SLUG>_USERNAME / _PASSWORD
 ```
+
+Env files do not support inline comments: podman keeps everything after the
+`=` as part of the value, so put comments on their own line.
+
+`store.db_path` must stay the default `/data/obsboard.db` when using these host
+files: `apply.sh` restores `obsboard.db` in `/var/lib/obs-dashboard`.
 
 ## First install (as root)
 
@@ -110,6 +117,12 @@ there, so the next run does not revert it.
    restarts the previous version. It always writes `apply/apply-status`,
    which the dashboard reads and shows.
 5. Logs: `journalctl -u obs-dashboard-apply`.
+6. If the apply service hits its start limit (`StartLimitBurst=3` per 5
+   minutes) it stops starting. Recover with:
+
+   ```sh
+   systemctl reset-failed obs-dashboard-apply.service obs-dashboard-apply.path && systemctl restart obs-dashboard-apply.path
+   ```
 
 ## Manual rollback to an earlier version
 

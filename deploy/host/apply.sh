@@ -137,6 +137,11 @@ if [[ ! -f $REQ ]]; then
 fi
 trap on_exit EXIT
 
+if [[ -L $REQ ]]; then
+  rm -f "$REQ"
+  fail "apply-request must not be a symlink"
+fi
+
 VERSION=$(jq -r '.version // "" | tostring' "$REQ" 2>/dev/null) || VERSION=""
 BACKUP=$(jq -r '.backup // "" | tostring' "$REQ" 2>/dev/null) || BACKUP=""
 [[ -f $DROPIN ]] || fail "version drop-in $DROPIN is missing"
