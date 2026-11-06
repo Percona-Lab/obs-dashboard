@@ -67,7 +67,18 @@ Google account.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
    - `OBS_DASHBOARD_ADMINS` — comma-separated emails that are always allowed
 3. Set `auth.public_url` in `config.yaml` (or `AUTH_PUBLIC_URL`) to the URL
-   the dashboard is served from. Sign-in only works from that host.
+   the dashboard is served from, as scheme and host only (no path). It drives
+   both the OAuth redirect (`<public_url>/auth/callback`) and the Origin
+   check on actions, so sign-in only works from that exact origin.
+4. **Local development:** set `AUTH_PUBLIC_URL=http://localhost:5173` in
+   `.env`. The dev UI is served by Vite on 5173 (the backend on 4000 serves
+   only `/api`); leaving the production value from the example config would
+   send the OAuth redirect to the production callback and make every action
+   fail with 403.
+
+Once `GOOGLE_CLIENT_ID` is set, `GOOGLE_CLIENT_SECRET` and `public_url` are
+required or startup fails. Sessions last `auth.session_ttl` (env
+`AUTH_SESSION_TTL`, default `168h`).
 
 Admins and anyone they add can manage the allowlist on the **Settings** tab.
 Removing someone ends their sessions immediately.
