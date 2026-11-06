@@ -3,6 +3,8 @@ import type { Context } from '../types/api'
 import { PPG_STAGING_CONTEXT } from '../lib/contexts'
 import type { WindowKey } from '../types/overview'
 
+export type MainTab = 'board' | 'artifacts' | 'overview' | 'settings'
+
 export function contextToKey(ctx: Context): string {
   const parts = ctx.prefix.split(':')
   const prIdx = parts.findIndex(p => p.toLowerCase() === 'pr')
@@ -17,7 +19,7 @@ export function keyToContext(key: string, contexts: Context[]): Context | undefi
 }
 
 interface UrlStateOptions {
-  mainTab: Ref<'board' | 'artifacts' | 'overview'>
+  mainTab: Ref<MainTab>
   boardCtx: Ref<Context>
   version: Ref<string>
   activeTags: Ref<string[]>
@@ -48,7 +50,7 @@ export function useUrlState(state: UrlStateOptions): void {
     const params = new URLSearchParams(window.location.search)
 
     const tab = params.get('tab')
-    if (tab === 'board' || tab === 'artifacts' || tab === 'overview') mainTab.value = tab
+    if (tab === 'board' || tab === 'artifacts' || tab === 'overview' || tab === 'settings') mainTab.value = tab
 
     const ver = params.get('version')
     if (ver) version.value = ver
