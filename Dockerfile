@@ -12,7 +12,8 @@ WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ .
-RUN CGO_ENABLED=0 go build -o /obsboard ./cmd/obsboard
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -ldflags "-X github.com/percona/obs-dashboard/internal/version.Version=${VERSION}" -o /obsboard ./cmd/obsboard
 
 # Stage 3: minimal runtime image
 FROM ghcr.io/aquasecurity/trivy:latest AS trivy

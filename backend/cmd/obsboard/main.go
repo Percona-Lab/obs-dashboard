@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/percona/obs-dashboard/internal/store"
 	"github.com/percona/obs-dashboard/internal/telemetry"
 	"github.com/percona/obs-dashboard/internal/unblocker"
+	"github.com/percona/obs-dashboard/internal/version"
 	"github.com/percona/obs-dashboard/internal/worker"
 	"github.com/percona/obs-dashboard/internal/workingset"
 )
@@ -37,6 +37,7 @@ func main() {
 }
 
 func run() error {
+	slog.Info("obs-dashboard starting", "version", version.Version)
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -185,17 +186,7 @@ func run() error {
 		h.Notify(hub.InstanceHealth(map[string]any{"slug": slug, "health": health}))
 	})
 
-	var handler http.Handler = router
-	if cfg.Server.FrontendDir != "" {
-		fs := http.FileServer(http.Dir(cfg.Server.FrontendDir))
-		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/auth/") {
-				router.ServeHTTP(w, r)
-			} else {
-				fs.ServeHTTP(w, r)
-			}
-		})
-	}
+	handler := api.WithFrontend(router, cfg.Server.FrontendDir)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.HTTPPort),

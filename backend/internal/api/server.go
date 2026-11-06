@@ -52,6 +52,7 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 	})
 	r.Use(authSvc.LoadUser)
 	authSvc.Mount(r)
+	r.Get("/healthz", healthzHandler)
 	releaseArtifacts := newReleaseArtifactsCache(10 * time.Minute)
 	metadataCache := newBinaryListCache(5 * time.Minute)
 	overview := newOverviewCache(60 * time.Second)
