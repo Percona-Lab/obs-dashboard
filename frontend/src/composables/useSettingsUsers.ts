@@ -1,15 +1,11 @@
 import { ref } from 'vue'
 import { handleUnauthorized } from './useAuth'
+import { errorText } from './http'
 
 export interface AllowedUser {
   email: string
   added_by: string
   added_at: string
-}
-
-async function errorText(res: Response): Promise<string> {
-  const text = (await res.text().catch(() => '')).trim()
-  return text || `HTTP ${res.status}`
 }
 
 export function useSettingsUsers() {
