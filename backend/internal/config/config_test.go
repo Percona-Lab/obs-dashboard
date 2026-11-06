@@ -418,3 +418,66 @@ func TestLoadInstanceInvalidMQURL(t *testing.T) {
 		t.Fatal("expected a validation error for an invalid mq.url")
 	}
 }
+
+func TestAuthDefaults(t *testing.T) {
+	t.Setenv("OBS_USERNAME", "u")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.SessionTTL != 168*time.Hour {
+		t.Errorf("session ttl: got %v", cfg.Auth.SessionTTL)
+	}
+	if cfg.Auth.Enabled() {
+		t.Error("auth enabled without GOOGLE_CLIENT_ID")
+	}
+	if len(cfg.Auth.Admins) != 0 {
+		t.Errorf("admins: %v", cfg.Auth.Admins)
+	}
+}
+
+func TestAuthAdminsFromFileAndEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("auth:\n  admins: [\"root@percona.com\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_FILE", path)
+	t.Setenv("OBS_USERNAME", "u")
+	t.Setenv("OBS_DASHBOARD_ADMINS", " a@percona.com, ,B@percona.com ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"root@percona.com", "a@percona.com", "B@percona.com"}
+	if strings.Join(cfg.Auth.Admins, ",") != strings.Join(want, ",") {
+		t.Errorf("admins: got %v want %v", cfg.Auth.Admins, want)
+	}
+}
+
+func TestAuthEnabledValidation(t *testing.T) {
+	t.Setenv("OBS_USERNAME", "u")
+	t.Setenv("GOOGLE_CLIENT_ID", "id")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "GOOGLE_CLIENT_SECRET") {
+		t.Fatalf("missing secret: got %v", err)
+	}
+	t.Setenv("GOOGLE_CLIENT_SECRET", "secret")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "auth.public_url") {
+		t.Fatalf("missing public_url: got %v", err)
+	}
+	t.Setenv("AUTH_PUBLIC_URL", "dashboard.example")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "auth.public_url") {
+		t.Fatalf("relative public_url: got %v", err)
+	}
+	t.Setenv("AUTH_PUBLIC_URL", "https://dashboard.obs.pg.labs.percona.com/")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Auth.Enabled() || cfg.Auth.PublicURL != "https://dashboard.obs.pg.labs.percona.com" {
+		t.Fatalf("auth: %+v", cfg.Auth)
+	}
+	if cfg.Auth.GoogleClientID != "id" || cfg.Auth.GoogleClientSecret != "secret" {
+		t.Fatalf("credentials not loaded: %+v", cfg.Auth)
+	}
+}
