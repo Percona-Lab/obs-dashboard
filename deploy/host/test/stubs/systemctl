@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test stub: start/restart "runs" the version pinned in $DROPIN; stop clears it.
+# STUB_START_FAIL=1 makes `start` (used by rollback) fail.
+echo "systemctl $*" >>"$STUB_CALLS"
+case $1 in
+  start | restart)
+    if [[ $1 == start && ${STUB_START_FAIL:-0} == 1 ]]; then exit 1; fi
+    sed -n 's|^Image=.*:\(v[0-9][0-9.]*\)$|\1|p' "$DROPIN" >"$STUB_DIR/running"
+    ;;
+  stop) rm -f "$STUB_DIR/running" ;;
+esac
+exit 0

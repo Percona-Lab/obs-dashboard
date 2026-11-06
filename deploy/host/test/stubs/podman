@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Test stub: records calls; STUB_PULL_FAIL=1 makes `pull` fail.
+echo "podman $*" >>"$STUB_CALLS"
+if [[ $1 == pull && ${STUB_PULL_FAIL:-0} == 1 ]]; then
+  echo "Error: manifest unknown" >&2
+  exit 125
+fi
+exit 0

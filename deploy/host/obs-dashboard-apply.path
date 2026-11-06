@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for obs-dashboard upgrade requests
+
+[Path]
+PathExists=/etc/obs-dashboard/apply/apply-request
+Unit=obs-dashboard-apply.service
+
+[Install]
+WantedBy=paths.target

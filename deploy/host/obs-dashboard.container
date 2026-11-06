@@ -1,0 +1,28 @@
+# obs-dashboard Quadlet unit; generates obs-dashboard.service.
+# Install to /etc/containers/systemd/. Site values live in /etc/obs-dashboard/env.
+[Unit]
+Description=OBS Dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=obs-dashboard
+# Image= lives in obs-dashboard.container.d/10-version.conf (written once at
+# install, rewritten only by apply.sh).
+PublishPort=127.0.0.1:4000:4000
+Volume=/var/lib/obs-dashboard:/data:Z
+Volume=/etc/obs-dashboard/config.yaml:/config/config.yaml:ro,Z
+Volume=/etc/obs-dashboard/apply:/apply:Z
+EnvironmentFile=/etc/obs-dashboard/env
+Environment=CONFIG_FILE=/config/config.yaml
+Environment=UPGRADE_APPLY_DIR=/apply
+HealthCmd=wget -qO- http://127.0.0.1:4000/healthz
+HealthInterval=30s
+HealthStartPeriod=60s
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
