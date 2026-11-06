@@ -150,6 +150,12 @@ func (s *Service) CheckOrigin(next http.Handler) http.Handler {
 // enabled; /api/me always exists.
 func (s *Service) Mount(r chi.Router) {
 	r.Get("/api/me", s.handleMe)
+	r.Group(func(r chi.Router) {
+		r.Use(s.RequireUser, s.CheckOrigin)
+		r.Get("/api/settings/users", s.handleListUsers)
+		r.Post("/api/settings/users", s.handleAddUser)
+		r.Delete("/api/settings/users/{email}", s.handleRemoveUser)
+	})
 	if !s.Enabled() {
 		return
 	}
