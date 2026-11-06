@@ -67,6 +67,16 @@ write_pin() { # <version>
   mv -f "$tmp" "$DROPIN"
 }
 
+# backup_ok: the backup is a regular, non-symlink file that resolves inside
+# $DATA_DIR/backups, and that directory is not itself a symlink. The container
+# can write $DATA_DIR, so none of these may be assumed.
+backup_ok() {
+  local dir="$DATA_DIR/backups" f="$DATA_DIR/backups/$BACKUP" real
+  [[ -d $dir && ! -L $dir && -f $f && ! -L $f ]] || return 1
+  real=$(realpath -e -- "$f") || return 1
+  [[ $real == "$(realpath -e -- "$dir")/$BACKUP" ]]
+}
+
 wait_healthy() { # <version>
   local deadline=$((SECONDS + HEALTH_TIMEOUT)) body got
   while ((SECONDS < deadline)); do
@@ -81,13 +91,15 @@ wait_healthy() { # <version>
 
 rollback() { # <reason>
   set +e
-  local problems=() db="$DATA_DIR/obsboard.db" stopped=1
+  local problems=() db="$DATA_DIR/obsboard.db" stopped=1 tmp=""
   log "rolling back to $PREVIOUS: $1"
   "$SYSTEMCTL" stop "$UNIT" || { problems+=("stop failed"); stopped=0; }
   if ((stopped)); then
-    if cp -f "$DATA_DIR/backups/$BACKUP" "$db.restore" && mv -f "$db.restore" "$db"; then
+    if tmp=$(mktemp "$DATA_DIR/.obsboard.db.XXXXXX") && backup_ok &&
+      cp -f "$DATA_DIR/backups/$BACKUP" "$tmp" && mv -f "$tmp" "$db"; then
       rm -f "$db-wal" "$db-shm"
     else
+      [[ -n $tmp ]] && rm -f "$tmp"
       problems+=("database restore failed")
     fi
   fi
@@ -132,7 +144,8 @@ PREVIOUS=$(pinned_version)
 [[ $PREVIOUS =~ $VERSION_RE ]] || fail "cannot read the running version from $DROPIN"
 [[ $VERSION =~ $VERSION_RE ]] || fail "invalid version in request: '$VERSION'"
 [[ $BACKUP =~ $BACKUP_RE ]] || fail "invalid backup name in request: '$BACKUP'"
-[[ -f $DATA_DIR/backups/$BACKUP ]] || fail "backup not found: $BACKUP"
+[[ -e $DATA_DIR/backups/$BACKUP || -L $DATA_DIR/backups/$BACKUP ]] || fail "backup not found: $BACKUP"
+backup_ok || fail "backup is not a regular file inside the backups directory: $BACKUP"
 [[ $VERSION != "$PREVIOUS" ]] || fail "$VERSION is already running"
 
 log "upgrading $PREVIOUS -> $VERSION (backup $BACKUP)"
