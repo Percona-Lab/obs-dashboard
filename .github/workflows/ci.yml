@@ -133,3 +133,6 @@ jobs:
 
       - name: Apply script tests
         run: deploy/host/test/run.sh
+
+      - name: Release script tests
+        run: scripts/test/run.sh

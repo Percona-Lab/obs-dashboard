@@ -25,3 +25,8 @@ tasks:
     desc: Stop the production stack
     cmds:
       - docker compose -f docker-compose.prod.yml down
+
+  release:
+    desc: Cut a release locally (task release VERSION=X.Y.Z); tags but never pushes
+    cmds:
+      - scripts/release.sh {{.VERSION}}
