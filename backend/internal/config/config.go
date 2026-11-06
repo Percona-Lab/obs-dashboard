@@ -19,6 +19,7 @@ type Config struct {
 	Telemetry  TelemetryConfig
 	Unblocker  UnblockerConfig
 	Idle       IdleConfig
+	Auth       AuthConfig
 	// Instances lists every OBS instance the dashboard reads from, in config
 	// order. Always at least one (the legacy instance when obs_instances is
 	// absent).
@@ -148,6 +149,50 @@ type IdleConfig struct {
 	Linger  time.Duration
 }
 
+// AuthConfig configures Google sign-in. Sign-in is enabled only when
+// GoogleClientID is set; otherwise protected actions are unavailable.
+type AuthConfig struct {
+	PublicURL          string
+	Admins             []string
+	SessionTTL         time.Duration
+	GoogleClientID     string
+	GoogleClientSecret string
+}
+
+// Enabled reports whether Google sign-in is configured.
+func (a AuthConfig) Enabled() bool { return a.GoogleClientID != "" }
+
+// loadAuth reads the auth section. Admins come from auth.admins plus the
+// comma-separated OBS_DASHBOARD_ADMINS env var.
+func loadAuth(v *viper.Viper) (AuthConfig, error) {
+	ttl, err := time.ParseDuration(v.GetString("auth.session_ttl"))
+	if err != nil {
+		return AuthConfig{}, fmt.Errorf("invalid AUTH_SESSION_TTL %q: %w", v.GetString("auth.session_ttl"), err)
+	}
+	a := AuthConfig{
+		PublicURL:          strings.TrimRight(v.GetString("auth.public_url"), "/"),
+		SessionTTL:         ttl,
+		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+	}
+	for _, e := range append(v.GetStringSlice("auth.admins"), strings.Split(os.Getenv("OBS_DASHBOARD_ADMINS"), ",")...) {
+		if e = strings.TrimSpace(e); e != "" {
+			a.Admins = append(a.Admins, e)
+		}
+	}
+	if !a.Enabled() {
+		return a, nil
+	}
+	if a.GoogleClientSecret == "" {
+		return AuthConfig{}, fmt.Errorf("GOOGLE_CLIENT_SECRET is required when GOOGLE_CLIENT_ID is set")
+	}
+	u, err := url.Parse(a.PublicURL)
+	if a.PublicURL == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return AuthConfig{}, fmt.Errorf("auth.public_url (or AUTH_PUBLIC_URL) must be an absolute http(s) URL when GOOGLE_CLIENT_ID is set, got %q", a.PublicURL)
+	}
+	return a, nil
+}
+
 func loadInstances(v *viper.Viper, legacy legacyConfig) ([]InstanceConfig, error) {
 	var raw []rawInstance
 	if v.IsSet("obs_instances") {
@@ -259,6 +304,7 @@ func Load() (*Config, error) {
 	v.SetDefault("unblocker.threshold", "30m")
 	v.SetDefault("idle.enabled", true)
 	v.SetDefault("idle.linger", "5m")
+	v.SetDefault("auth.session_ttl", "168h")
 
 	// Config file (optional)
 	cfgFile := "config.yaml"
@@ -294,6 +340,8 @@ func Load() (*Config, error) {
 		{"unblocker.threshold", "UNBLOCKER_THRESHOLD"},
 		{"idle.enabled", "IDLE_ENABLED"},
 		{"idle.linger", "IDLE_LINGER"},
+		{"auth.public_url", "AUTH_PUBLIC_URL"},
+		{"auth.session_ttl", "AUTH_SESSION_TTL"},
 	} {
 		_ = v.BindEnv(pair[0], pair[1])
 	}
@@ -385,6 +433,12 @@ func Load() (*Config, error) {
 	}
 	cfg.Instances = instances
 	cfg.LegacyRoot = legacy.root
+
+	authCfg, err := loadAuth(v)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Auth = authCfg
 
 	return cfg, nil
 }
