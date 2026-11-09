@@ -253,3 +253,31 @@ func scanCveRows(rows *sql.Rows) ([]model.CveScan, error) {
 	}
 	return scans, rows.Err()
 }
+
+// VulnerableImage is one image (a package in one repo) whose latest scan on
+// at least one arch has HIGH or CRITICAL findings.
+type VulnerableImage struct {
+	Project, Package, Repo string
+}
+
+// QueryVulnerableImages lists every image that currently carries HIGH or
+// CRITICAL CVEs, ordered by project, package, repo.
+func QueryVulnerableImages(db *sql.DB) ([]VulnerableImage, error) {
+	rows, err := db.Query(`
+		SELECT DISTINCT project, package, repo FROM cve_scans
+		WHERE critical_count + high_count > 0
+		ORDER BY project, package, repo`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VulnerableImage
+	for rows.Next() {
+		var v VulnerableImage
+		if err := rows.Scan(&v.Project, &v.Package, &v.Repo); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}

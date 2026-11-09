@@ -330,3 +330,43 @@ func TestCveScanRepoIndependentAgeTracking(t *testing.T) {
 		t.Fatalf("expected 1 ubi9 cve_period, got %d", n)
 	}
 }
+
+func TestQueryVulnerableImages(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	rows := []struct {
+		project, pkg, repo, arch string
+		crit, high               int
+	}{
+		{"p", "a", "images", "x86_64", 1, 0},
+		{"p", "a", "images", "aarch64", 0, 2}, // same image, second arch: one row
+		{"p", "a", "other", "x86_64", 0, 0},   // clean repo of the same package
+		{"p", "b", "images", "x86_64", 0, 0},  // clean package
+		{"q", "c", "images", "x86_64", 0, 3},
+	}
+	for _, r := range rows {
+		if err := store.UpsertCveScan(db, r.project, r.pkg, model.CveScan{
+			Repo: r.repo, Arch: r.arch, ImageRef: "ref", ScannedAt: now,
+			CriticalCount: r.crit, HighCount: r.high,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.QueryVulnerableImages(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []store.VulnerableImage{{"p", "a", "images"}, {"q", "c", "images"}}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
+}

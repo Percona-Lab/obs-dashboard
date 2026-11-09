@@ -11,6 +11,13 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Rescan affected** button in the "CVE exposure by project" header, for
+  signed-in users. It queues a fresh scan of every image that currently has
+  HIGH or CRITICAL CVEs, only for the affected repos. A rescan that is
+  already pending is not queued again.
+
 ## [0.1.0] - 2026-11-06
 
 ### Added

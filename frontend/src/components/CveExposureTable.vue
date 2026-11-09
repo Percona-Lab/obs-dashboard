@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref, onUnmounted } from 'vue'
 import type { OverviewProject } from '../types/overview'
 import type { CveScan } from '../types/api'
 import { oldestOpenLabel, oldestOpenColor, groupByCategory, formatFixHours } from '../lib/overview'
 import { latestScanTime } from '../lib/cve'
 import CveFindingsTable from './CveFindingsTable.vue'
+import { useAuth, handleUnauthorized } from '../composables/useAuth'
+import { errorText } from '../composables/http'
 
 const props = defineProps<{
   projects: OverviewProject[]
@@ -139,6 +141,47 @@ async function fetchReport(img: { project: string; name: string; repo: string })
 function reportScans(key: string): CveScan[] | null {
   return reportCache.get(key)?.scans ?? null
 }
+
+// --- Rescan of every image that currently has CVEs (signed-in users) -------
+// Results arrive through the scan events on the global stream, which already
+// trigger an overview refetch, so the table updates as scans finish.
+const { signedIn } = useAuth()
+const RESCAN_COOLDOWN_MS = 10_000
+const rescanBusy = ref(false)
+const rescanMsg = ref<string | null>(null)
+const rescanFailed = ref(false)
+let rescanTimer: ReturnType<typeof setTimeout> | null = null
+onUnmounted(() => { if (rescanTimer) clearTimeout(rescanTimer) })
+
+async function rescan() {
+  if (rescanBusy.value) return
+  rescanBusy.value = true
+  rescanFailed.value = false
+  rescanMsg.value = null
+  let cooldown = false
+  try {
+    const res = await fetch('/api/cve/rescan', { method: 'POST' })
+    if (res.status === 401) {
+      handleUnauthorized()
+      return
+    }
+    if (!res.ok) throw new Error(await errorText(res))
+    const { queued } = await res.json() as { queued: number }
+    rescanMsg.value = queued > 0
+      ? `Queued ${queued} image${queued === 1 ? '' : 's'}`
+      : 'Nothing queued: rescans already pending'
+    cooldown = true
+  } catch (e) {
+    rescanFailed.value = true
+    rescanMsg.value = `Rescan failed: ${e instanceof Error ? e.message : 'network error'}`
+  } finally {
+    if (cooldown) {
+      rescanTimer = setTimeout(() => { rescanBusy.value = false; rescanMsg.value = null }, RESCAN_COOLDOWN_MS)
+    } else {
+      rescanBusy.value = false
+    }
+  }
+}
 </script>
 
 <template>
@@ -146,6 +189,24 @@ function reportScans(key: string): CveScan[] | null {
     <div class="p-[15px_20px] border-b border-border flex items-baseline gap-[10px]">
       <h2 class="m-0 text-[14px] font-bold">CVE exposure by project</h2>
       <span class="text-[12px] text-text-muted">click a project to see per-image breakdown</span>
+      <template v-if="signedIn && groups.length > 0">
+        <span
+          v-if="rescanMsg"
+          data-testid="cve-rescan-status"
+          role="status"
+          class="ml-auto text-[12px]"
+          :class="rescanFailed ? 'text-fail' : 'text-text-muted'"
+        >{{ rescanMsg }}</span>
+        <button
+          type="button"
+          data-testid="cve-rescan"
+          class="px-[10px] py-[4px] rounded-[8px] border border-border bg-bg-card text-text-secondary text-[12px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-default self-center"
+          :class="rescanMsg ? '' : 'ml-auto'"
+          :disabled="rescanBusy"
+          title="Scan again every image that currently has CVEs"
+          @click="rescan"
+        >Rescan affected</button>
+      </template>
     </div>
 
     <div class="grid grid-cols-[1fr_90px_90px_130px_130px] gap-3 items-center p-[9px_20px] bg-bg-card-2 border-b border-border text-[10.5px] font-bold uppercase tracking-[0.05em] text-text-muted">
