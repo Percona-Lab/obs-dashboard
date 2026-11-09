@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,13 @@ type Scanner struct {
 	// trivyMu serializes trivy invocations: trivy uses a shared FS cache that
 	// cannot be accessed by more than one process at a time.
 	trivyMu sync.Mutex
+
+	// pending holds the keys of requests that are queued or running, so an
+	// identical request (same package, same repos) is not queued twice.
+	pendingMu sync.Mutex
+	pending   map[string]bool
+	// life bounds background enqueueing; set by Start.
+	life context.Context
 }
 
 // Option is a functional option for Scanner.
@@ -81,6 +89,8 @@ func NewScanner(db *sql.DB, h *hubpkg.Hub, workers int, opts ...Option) *Scanner
 		workers: workers,
 		execFn:  defaultExec,
 		urls:    obs.SingleFleet(nil, ""),
+		pending: map[string]bool{},
+		life:    context.Background(),
 	}
 	for _, o := range opts {
 		o(s)
@@ -94,23 +104,129 @@ func defaultExec(ctx context.Context, name string, args ...string) ([]byte, erro
 
 // Start launches worker goroutines. Call once; they run until ctx is cancelled.
 func (s *Scanner) Start(ctx context.Context) {
+	s.life = ctx
 	for i := 0; i < s.workers; i++ {
 		go s.run(ctx)
 	}
 }
 
 // Enqueue adds a scan request to the queue. Non-blocking: drops and logs a
-// warning if the queue is full.
+// warning if the queue is full. A request identical to one already queued or
+// running is skipped.
 func (s *Scanner) Enqueue(req ScanRequest) {
 	if s.enqueueFn != nil {
 		s.enqueueFn(req)
 		return
 	}
+	if !s.reserve(req) {
+		return
+	}
 	select {
 	case s.queue <- req:
 	default:
+		s.release(req)
 		slog.Warn("cve: scan queue full, dropping", "pkg", req.Project+"/"+req.Package)
 	}
+}
+
+// requestKey identifies a request by package and the set of repos it scans.
+func requestKey(req ScanRequest) string {
+	repos := make([]string, 0, len(req.Targets))
+	for _, t := range req.Targets {
+		repos = append(repos, t.Repo)
+	}
+	sort.Strings(repos)
+	return req.Project + "/" + req.Package + "|" + strings.Join(repos, ",")
+}
+
+// reserve marks req as pending; false if an identical request already is.
+func (s *Scanner) reserve(req ScanRequest) bool {
+	k := requestKey(req)
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.pending[k] {
+		return false
+	}
+	s.pending[k] = true
+	return true
+}
+
+func (s *Scanner) release(req ScanRequest) {
+	s.pendingMu.Lock()
+	delete(s.pending, requestKey(req))
+	s.pendingMu.Unlock()
+}
+
+// RescanVulnerable queues a fresh scan of every image that currently carries
+// HIGH or CRITICAL CVEs, limited to the vulnerable repos of each package.
+// Packages that are no longer published containers are skipped, as are
+// images whose identical rescan is already pending. It returns how many
+// images were queued. Requests are fed to the queue in the background,
+// waiting for room rather than dropping when the queue is full.
+func (s *Scanner) RescanVulnerable() (int, error) {
+	imgs, err := store.QueryVulnerableImages(s.db)
+	if err != nil {
+		return 0, err
+	}
+	repos := map[[2]string]map[string]bool{}
+	var order [][2]string
+	for _, img := range imgs {
+		k := [2]string{img.Project, img.Package}
+		if repos[k] == nil {
+			repos[k] = map[string]bool{}
+			order = append(order, k)
+		}
+		repos[k][img.Repo] = true
+	}
+
+	var reqs []ScanRequest
+	images := 0
+	for _, k := range order {
+		pkg, err := store.GetPackage(s.db, k[0], k[1])
+		if err != nil {
+			return 0, err
+		}
+		if pkg == nil || pkg.RollupState != model.RollupPublished || pkg.IsContainer == nil || !*pkg.IsContainer {
+			continue
+		}
+		req := packageToRequest(pkg)
+		var targets []model.Target
+		scanned := map[string]bool{}
+		for _, t := range req.Targets {
+			if repos[k][t.Repo] {
+				targets = append(targets, t)
+				scanned[t.Repo] = true
+			}
+		}
+		if len(targets) == 0 || req.PrimaryTag == "" {
+			continue
+		}
+		req.Targets = targets
+		if s.enqueueFn == nil && !s.reserve(req) {
+			continue
+		}
+		reqs = append(reqs, req)
+		images += len(scanned)
+	}
+
+	go func() {
+		for i, req := range reqs {
+			if s.enqueueFn != nil {
+				s.enqueueFn(req)
+				continue
+			}
+			select {
+			case s.queue <- req:
+			case <-s.life.Done():
+				for _, r := range reqs[i:] {
+					s.release(r)
+				}
+				return
+			}
+		}
+	}()
+	slog.Info("cve: rescan of vulnerable images queued", "images", images, "packages", len(reqs))
+	return images, nil
 }
 
 func (s *Scanner) run(ctx context.Context) {
@@ -123,6 +239,7 @@ func (s *Scanner) run(ctx context.Context) {
 				return
 			}
 			s.scanPackage(ctx, req)
+			s.release(req)
 		}
 	}
 }

@@ -555,3 +555,19 @@ func cveScansHandler(db *sql.DB) http.HandlerFunc {
 		}
 	}
 }
+
+// cveRescanHandler handles POST /api/cve/rescan: it queues a fresh scan of
+// every image that currently has HIGH/CRITICAL CVEs and returns
+// {"queued": N}, the number of images queued.
+func cveRescanHandler(rescan CveRescanner) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		n, err := rescan.RescanVulnerable()
+		if err != nil {
+			slog.Error("api: cve rescan", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int{"queued": n})
+	}
+}

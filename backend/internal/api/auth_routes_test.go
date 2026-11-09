@@ -35,7 +35,7 @@ func authRouter(t *testing.T, enabled bool) (http.Handler, *atomic.Bool, string)
 	}
 	obsClient := obs.SingleFleet(obs.NewClient(stubOBSServer(t).URL, "user", "pass"), "isv:percona")
 	tel := new(atomic.Bool)
-	r := NewRouter(db, hub.New(), obsClient, fakeStatter{}, tel, time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil)
+	r := NewRouter(db, hub.New(), obsClient, fakeStatter{}, tel, time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil)
 	return r, tel, sid
 }
 

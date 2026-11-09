@@ -37,9 +37,14 @@ type PresenceGate interface {
 	PollState
 }
 
+// CveRescanner queues a rescan of the images that currently carry CVEs.
+type CveRescanner interface {
+	RescanVulnerable() (int, error)
+}
+
 // NewRouter creates the chi router with all API routes registered. authSvc
 // gates state-changing routes; reads stay public.
-func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager) http.Handler {
+func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager, rescan CveRescanner) http.Handler {
 	r := chi.NewRouter()
 	r.Use(stripCallbackQuery)
 	r.Use(middleware.Logger)
@@ -97,6 +102,9 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 		r.Use(authSvc.RequireUser, authSvc.CheckOrigin)
 		r.Post("/api/rebuild", rebuildHandler(fleet))
 		r.Post("/api/telemetry", telemetrySetHandler(telemetryEnabled))
+		if rescan != nil {
+			r.Post("/api/cve/rescan", cveRescanHandler(rescan))
+		}
 	})
 
 	// Upgrades are an admin matter: even reads need a signed-in user.

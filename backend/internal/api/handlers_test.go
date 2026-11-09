@@ -41,7 +41,7 @@ func setupTestServer(t *testing.T) http.Handler {
 	t.Cleanup(func() { db.Close() })
 	obsSrv := stubOBSServer(t)
 	obsClient := obs.SingleFleet(obs.NewClient(obsSrv.URL, "user", "pass"), "isv:percona")
-	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, auth.Options{}), nil)
+	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, auth.Options{}), nil, nil)
 }
 
 func TestPackagesHandler_EmptyDB(t *testing.T) {
@@ -274,7 +274,7 @@ func TestReposSubprojectParam(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	obsSrv := stubOBSServer(t)
 	obsClient := obs.SingleFleet(obs.NewClient(obsSrv.URL, "user", "pass"), "isv:percona")
-	router := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, auth.Options{}), nil)
+	router := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, auth.Options{}), nil, nil)
 
 	falseVal := false
 	now := time.Now()
@@ -615,7 +615,7 @@ func TestEventsHandlerIncludesCommonTrees(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	obsSrv := stubOBSServer(t)
 	obsClient := obs.SingleFleet(obs.NewClient(obsSrv.URL, "user", "pass"), "isv:percona")
-	router := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, auth.Options{}), nil)
+	router := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, auth.Options{}), nil, nil)
 
 	now := time.Now().UTC()
 	seed := func(id, project string) {
