@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-09
+
 ### Added
 
 - **Rescan affected** button in the "CVE exposure by project" header, for
