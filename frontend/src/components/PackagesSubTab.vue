@@ -4,7 +4,7 @@ import type { ArtifactBinary, PackageRow, RepoInfo } from '../composables/useArt
 import { distroGroup } from '../composables/useArtifacts'
 import { formatArtifactTime } from '../lib/cve'
 import { useInstances } from '../composables/useInstances'
-import { obsProject, downloadBase } from '../lib/instances'
+import { obsProject, downloadBase, binaryUrl } from '../lib/instances'
 import { repoSetupSnippet } from '../lib/repoSetup'
 import InstanceBadge from './InstanceBadge.vue'
 
@@ -126,8 +126,7 @@ async function toggleRow(row: PackageRow) {
 }
 
 function downloadUrl(row: PackageRow, filename: string): string {
-  const base = downloadBase(instanceFor(row.instance), row.project, row.repo.obs)
-  return base ? `${base}${row.arch}/${filename}` : ''
+  return binaryUrl(downloadBase(instanceFor(row.instance), row.project, row.repo.obs), row.arch, filename)
 }
 
 // ----- labels -----

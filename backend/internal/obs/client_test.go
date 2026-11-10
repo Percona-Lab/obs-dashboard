@@ -3,8 +3,10 @@ package obs
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -736,5 +738,44 @@ func TestPackageAggregateSource(t *testing.T) {
 				t.Errorf("got (%q, %q, %v), want (%q, %q, %v)", proj, pkg, ok, tc.wantProj, tc.wantPkg, tc.wantOK)
 			}
 		})
+	}
+}
+
+// PG-2860: tarball repos publish .tar.gz distribution tarballs; PackageBinaries
+// must return them so the dashboard links the real published filename. A
+// .tar.gz in a non-tarball repo (e.g. a Debian source tarball) stays excluded.
+func TestPackageBinariesTarballs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/ssl1.1/") {
+			fmt.Fprint(w, `<binarylist>
+  <binary filename="_buildenv"/>
+  <binary filename="_statistics"/>
+  <binary filename="percona-postgresql-18.6-ssl1.1-linux-x86_64.tar.gz"/>
+</binarylist>`)
+			return
+		}
+		fmt.Fprint(w, `<binarylist>
+  <binary filename="pkg_1.0.orig.tar.gz"/>
+  <binary filename="pkg_1.0-1_amd64.deb"/>
+</binarylist>`)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, "u", "p")
+	ctx := Interactive(context.Background())
+
+	got, err := c.PackageBinaries(ctx, "p", "ssl1.1", "x86_64", "percona-postgresql-tarball")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"percona-postgresql-18.6-ssl1.1-linux-x86_64.tar.gz"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ssl repo: got %v, want %v", got, want)
+	}
+
+	got, err = c.PackageBinaries(ctx, "p", "Ubuntu_26.04", "x86_64", "pkg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"pkg_1.0-1_amd64.deb"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("deb repo: got %v, want %v", got, want)
 	}
 }

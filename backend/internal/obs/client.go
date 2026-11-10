@@ -908,8 +908,17 @@ func IsDistributableBinary(filename string) bool {
 	}
 }
 
-// PackageBinaries returns the distributable binary filenames for a package build target.
-// Source packages, debug info/symbols, and non-package artifacts are excluded.
+// IsTarballBinary reports whether filename is a distribution tarball: a .tar.gz
+// built against an OpenSSL-versioned tarball repo (ssl1.1 / ssl3 / ssl3.5 / …).
+// Other repos' .tar.gz files (e.g. Debian source tarballs) are not tarballs.
+func IsTarballBinary(repo, filename string) bool {
+	return strings.HasPrefix(strings.ToLower(repo), "ssl") && strings.HasSuffix(filename, ".tar.gz")
+}
+
+// PackageBinaries returns the distributable binary filenames for a package build target:
+// installable packages (see IsDistributableBinary) and distribution tarballs
+// (see IsTarballBinary). Source packages, debug info/symbols, and other
+// artifacts are excluded.
 func (c *Client) PackageBinaries(ctx context.Context, project, repo, arch, pkg string) ([]string, error) {
 	path := fmt.Sprintf("/build/%s/%s/%s/%s",
 		url.PathEscape(project), url.PathEscape(repo),
@@ -931,7 +940,7 @@ func (c *Client) PackageBinaries(ctx context.Context, project, repo, arch, pkg s
 
 	var out []string
 	for _, b := range listing.Binaries {
-		if IsDistributableBinary(b.Filename) {
+		if IsDistributableBinary(b.Filename) || IsTarballBinary(repo, b.Filename) {
 			out = append(out, b.Filename)
 		}
 	}

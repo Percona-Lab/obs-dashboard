@@ -213,7 +213,7 @@ func TestBuildReleaseTarballArtifacts(t *testing.T) {
 		t.Fatalf("want 3 tarball artifacts, got %d: %+v", len(out), out)
 	}
 	for _, a := range out {
-		if !isTarballRepo(a.Repo) {
+		if !strings.HasPrefix(a.Repo, "ssl") {
 			t.Errorf("non-ssl repo leaked: %q", a.Repo)
 		}
 		if a.Name != "percona-postgresql-tarball" {
