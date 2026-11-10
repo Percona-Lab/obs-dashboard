@@ -11,6 +11,15 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-10
+
+### Fixed
+
+- Artifacts download links that returned 404 (PG-2860). Debian packages now
+  link to the Debian arch folder (`amd64/`, `arm64/`, `all/`) and `noarch`
+  RPMs to `noarch/`, instead of the build arch. Tarball links use the
+  published filename from OBS instead of one rebuilt from the package version.
+
 ## [0.1.1] - 2026-11-09
 
 ### Added
