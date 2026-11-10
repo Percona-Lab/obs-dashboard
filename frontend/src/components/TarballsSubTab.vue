@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import type { Tarball } from '../composables/useArtifacts'
-import { tarballRepoOrder, tarballDownloadUrl } from '../lib/tarballs'
+import { tarballRepoOrder } from '../lib/tarballs'
 import { formatArtifactTime } from '../lib/cve'
 import { useInstances } from '../composables/useInstances'
 import { downloadBase } from '../lib/instances'
@@ -13,6 +13,45 @@ const props = defineProps<{
 }>()
 
 const { instanceFor } = useInstances()
+
+// Published tarball filenames, resolved from the OBS binary list rather than
+// reconstructed from the package version, which does not reliably match the
+// published name (PG-2860). Keyed per build (builtAt) so a rebuild re-resolves.
+const filenames = reactive<Record<string, string | null>>({})
+
+function fileKey(t: Tarball, arch: string): string {
+  return `${t.id}/${arch}/${t.builtAt}`
+}
+
+async function resolveFilename(t: Tarball, arch: string, key: string) {
+  filenames[key] = null
+  try {
+    const params = new URLSearchParams({ project: t.project, repo: t.repo, arch, package: t.name })
+    const res = await fetch(`/api/binaries?${params}`)
+    if (!res.ok) return
+    const data = await res.json() as { binaries: string[] }
+    filenames[key] = data.binaries.find(f => f.endsWith('.tar.gz')) ?? null
+  } catch {
+    // unresolved: the link falls back to the repo directory
+  }
+}
+
+watch(() => props.tarballs, tarballs => {
+  for (const t of tarballs) {
+    for (const arch of t.arches) {
+      const key = fileKey(t, arch)
+      if (!(key in filenames)) void resolveFilename(t, arch, key)
+    }
+  }
+}, { immediate: true })
+
+// Direct file link once the filename is known; until then (or if it cannot be
+// resolved) the repo directory listing, which always exists.
+function downloadHref(t: Tarball, arch: string): string | undefined {
+  const base = downloadBase(instanceFor(t.instance), t.project, t.repo)
+  if (!base) return undefined
+  return base + (filenames[fileKey(t, arch)] ?? '')
+}
 
 // Group tarballs by ssl repo, sorted ssl1.1 < ssl3 < ssl3.5.
 const groups = computed(() => {
@@ -120,15 +159,14 @@ function rebuildBadge(t: Tarball): { label: string; cls: string } | null {
               <span v-else class="block mt-[6px] text-[12px] text-text-muted">No architectures yet</span>
             </div>
 
-            <!-- Download (per arch) — only when version is known, so the
-                 constructed instance download URL is never partial. -->
-            <div v-if="tarball.version && tarball.arches.length > 0" class="px-[18px] py-3 border-b border-border">
+            <!-- Download (per arch) -->
+            <div v-if="tarball.arches.length > 0" class="px-[18px] py-3 border-b border-border">
               <div class="section-label">DOWNLOAD</div>
               <div class="flex flex-wrap gap-[6px] mt-2">
                 <a
                   v-for="arch in tarball.arches"
                   :key="arch"
-                  :href="tarballDownloadUrl(downloadBase(instanceFor(tarball.instance), tarball.project, tarball.repo), tarball.repo, tarball.name, tarball.version, arch) || undefined"
+                  :href="downloadHref(tarball, arch)"
                   target="_blank"
                   rel="noopener"
                   class="inline-flex items-center gap-[5px] font-mono text-[11px] px-[9px] py-[4px] rounded-[6px] bg-brand-purple-tint text-brand-purple font-bold no-underline"

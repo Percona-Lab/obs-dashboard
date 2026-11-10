@@ -22,6 +22,17 @@ export function downloadBase(inst: ObsInstance | undefined, project: string, rep
   return inst ? `${inst.download_url}/${obsProject(inst, project).split(':').join(':/')}/${repo}/` : ''
 }
 
+// Published URL of a package binary under a repo base URL (see downloadBase).
+// OBS publishes each file in a directory named by the arch in the filename, not
+// by the build arch: name-ver.<arch>.rpm -> x86_64/ or noarch/, and
+// name_ver_<arch>.deb -> amd64/, arm64/ or all/ (PG-2860). Other files fall
+// back to the build arch.
+export function binaryUrl(base: string, buildArch: string, filename: string): string {
+  if (!base) return ''
+  const fileArch = filename.match(/\.([^./]+)\.rpm$/)?.[1] ?? filename.match(/_([^_/]+)\.deb$/)?.[1]
+  return `${base}${fileArch ?? buildArch}/${filename}`
+}
+
 export function registryRef(inst: ObsInstance | undefined, project: string, repo: string, name: string): string {
   return inst ? `${inst.registry}/${obsProject(inst, project).toLowerCase().split(':').join('/')}/${repo}/${name}` : ''
 }

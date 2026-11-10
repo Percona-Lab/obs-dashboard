@@ -399,7 +399,7 @@ func buildReleaseTarballArtifacts(binaries []obs.BinaryArtifact) []ReleaseTarbal
 	byKey := map[string]*ReleaseTarballArtifact{}
 	latestMTime := map[string]int64{}
 	for _, binary := range binaries {
-		if !isTarballRepo(binary.Repo) || !strings.HasSuffix(binary.Filename, ".tar.gz") {
+		if !obs.IsTarballBinary(binary.Repo, binary.Filename) {
 			continue
 		}
 		key := binary.Project + "\x00" + binary.Package + "\x00" + binary.Repo + "\x00" + binary.Arch
@@ -437,12 +437,6 @@ func buildReleaseTarballArtifacts(binaries []obs.BinaryArtifact) []ReleaseTarbal
 		return out[i].Arch < out[j].Arch
 	})
 	return out
-}
-
-// isTarballRepo reports whether an OBS build repo is an OpenSSL-versioned
-// tarball repo (ssl1.1 / ssl3 / ssl3.5 / …).
-func isTarballRepo(repo string) bool {
-	return strings.HasPrefix(strings.ToLower(repo), "ssl")
 }
 
 // tarballFileVersion extracts the upstream version from a published tarball
