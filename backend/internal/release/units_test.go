@@ -140,3 +140,40 @@ func TestUnitMembersAreExact(t *testing.T) {
 		t.Fatalf("row = %+v", rows[0])
 	}
 }
+
+func TestUnitEmptyIsBlocked(t *testing.T) {
+	rows, err := BuildUnitRows([]UnitDef{testDef()}, fakeSource{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rows[0]
+	if r.Tickable || r.Blocked == nil || r.Blocked.Reason != "not_built" {
+		t.Fatalf("row = %+v blocked=%+v", r, r.Blocked)
+	}
+	if r.Blocked.Text != "No packages found in staging." {
+		t.Fatalf("text = %q", r.Blocked.Text)
+	}
+	if len(r.Blocked.Packages) != 0 || r.Built != 0 || r.Total != 0 {
+		t.Fatalf("row = %+v", r)
+	}
+}
+
+func TestUnitEmptyInFlightWins(t *testing.T) {
+	rows, _ := BuildUnitRows([]UnitDef{testDef()}, fakeSource{}, map[string]string{"ppg-18": "r-9"}, nil)
+	b := rows[0].Blocked
+	if rows[0].Tickable || b == nil || b.Reason != "in_flight" {
+		t.Fatalf("row = %+v blocked=%+v", rows[0], b)
+	}
+}
+
+func TestUnitNotBuiltSorted(t *testing.T) {
+	src := fakeSource{"ppg:staging:18": {
+		pkg("ppg:staging:18", "zeta", "1", model.RollupFailed),
+		pkg("ppg:staging:18", "alpha", "1", model.RollupFailed),
+	}}
+	rows, _ := BuildUnitRows([]UnitDef{testDef()}, src, nil, nil)
+	got := rows[0].Blocked.Packages
+	if len(got) != 2 || got[0] != "alpha" || got[1] != "zeta" {
+		t.Fatalf("packages = %v", got)
+	}
+}
