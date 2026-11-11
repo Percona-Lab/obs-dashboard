@@ -31,9 +31,8 @@ export interface InstanceCard {
   started_at: string | null
   finished_at: string | null
   cdn: string
-  failed_units: string[]
-  /** Release projects the instance holds nothing of (populate report outcome "skipped"). */
-  skipped_units: string[]
+  /** Each release project of the populate report with its outcome on this instance; empty until the job reported. `skipped`: the instance holds nothing of it. */
+  units: { project: string; outcome: 'success' | 'failure' | 'skipped' }[]
   /** The job succeeded and every entry of its report was skipped. */
   nothing_to_sync: boolean
   errors: string[]
@@ -69,6 +68,8 @@ export interface ReleaseState {
   cut: { state: CutState; url: string } | null
   sync_state: string
   sync_url: string // the run the sync state was read from; '' while none
+  /** Why the sync failed when no single instance did: a unit populated on no instance. */
+  sync_error: string
   sync: InstanceCard[]
   removals: { project: string; item: string }[]
   // url: the QA run ('' while none). error: why QA could not run, set with state 'failure'.

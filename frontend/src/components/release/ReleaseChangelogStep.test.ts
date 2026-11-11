@@ -16,7 +16,7 @@ vi.mock('../../composables/useRelease', () => ({
 const rel = (o: Partial<ReleaseState> = {}, changelog = 'orig', generated: string | null = 'gen'): ReleaseState => ({
   id: '20261111T143210', branch: 'b', pr: 1, pr_url: 'u', head_sha: 'abc', step: 'changelog', dashboard: true,
   units: [{ unit: 'ppg:staging:18', release_project: '', release_dir: '', release_id: '18.6-6', tag: '', changelog, generated }],
-  cut: null, sync_state: '', sync_url: '', sync: [], removals: [], qa: null, final: null, started_by: '', started_at: null, actions: [], cut_units: [], ...o,
+  cut: null, sync_state: '', sync_url: '', sync_error: '', sync: [], removals: [], qa: null, final: null, started_by: '', started_at: null, actions: [], cut_units: [], ...o,
 })
 
 beforeEach(() => { vi.clearAllMocks(); resetDraftsForTests(); document.body.innerHTML = '' })

@@ -14,7 +14,7 @@ type QAIn = Pick<QA, 'state' | 'lanes'> & Partial<QA>
 const rel = (qaIn: QAIn, o: Partial<ReleaseState> = {}): ReleaseState => { const qa: QA = { url: '', error: '', ...qaIn }; return {
   id: 'r1', branch: 'b', pr: 5, pr_url: '', head_sha: 'abc', step: 'qa', dashboard: true,
   units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '18.6-6', tag: '', changelog: '', generated: null }],
-  cut: null, sync_state: 'success', sync_url: '', sync: [], removals: [], qa, final: null, started_by: '', started_at: null, actions: [], cut_units: [], ...o,
+  cut: null, sync_state: 'success', sync_url: '', sync_error: '', sync: [], removals: [], qa, final: null, started_by: '', started_at: null, actions: [], cut_units: [], ...o,
 } }
 const mountQ = (qa: QAIn, o: Partial<ReleaseState> = {}) => mount(ReleaseQaStep, { props: { release: rel(qa, o) }, attachTo: document.body })
 

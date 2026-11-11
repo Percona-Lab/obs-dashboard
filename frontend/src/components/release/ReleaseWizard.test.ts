@@ -14,7 +14,7 @@ vi.mock('../../composables/useRelease', () => ({
 const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
   id: 'r1', branch: 'b', pr: 5, pr_url: 'https://github.com/o/r/pull/5', head_sha: 'abc', step: 'sync', dashboard: true,
   units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '18.6-6', tag: '', changelog: 'text', generated: null }],
-  cut: null, sync_state: '', sync_url: '', sync: [], removals: [], qa: null, final: null, started_by: 'me', started_at: null, actions: [], cut_units: [], ...o,
+  cut: null, sync_state: '', sync_url: '', sync_error: '', sync: [], removals: [], qa: null, final: null, started_by: 'me', started_at: null, actions: [], cut_units: [], ...o,
 })
 const mountW = (o: Partial<ReleaseState> = {}) => mount(ReleaseWizard, { props: { release: rel(o) }, attachTo: document.body })
 
@@ -106,6 +106,14 @@ describe('ReleaseWizard', () => {
     expect(w.text()).not.toContain('20261111T230450')
   })
 
+  it('says why the sync failed when a unit was populated on no instance', () => {
+    const w = mountW({ step: 'sync', sync_state: 'failure', sync_error: 'ppg:releases:16:tde was not populated on any instance.',
+      sync: [{ instance: 'labs', state: 'success', url: '', started_at: null, finished_at: null, cdn: '', errors: [], units: [{ project: 'ppg:releases:16:tde', outcome: 'skipped' }], nothing_to_sync: true }] })
+    expect(w.get('[data-testid="sync-error"]').text()).toContain('ppg:releases:16:tde was not populated on any instance.')
+    expect(w.find('[data-testid="retry-sync"]').exists()).toBe(true)
+    expect(mountW({ step: 'sync', sync_state: 'running', sync_error: '' }).find('[data-testid="sync-error"]').exists()).toBe(false)
+  })
+
   it('hides abandon while releasing', () => {
     expect(mountW({ step: 'releasing' }).find('[data-testid="abandon"]').exists()).toBe(false)
     expect(mountW({ step: 'qa' }).find('[data-testid="abandon"]').exists()).toBe(true)
@@ -161,7 +169,7 @@ describe('ReleaseWizard', () => {
   })
 
   it('offers Retry final sync when the final sync failed', async () => {
-    const inst = { instance: 'obs-a', state: 'failure' as const, url: '', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [], skipped_units: [], nothing_to_sync: false }
+    const inst = { instance: 'obs-a', state: 'failure' as const, url: '', started_at: null, finished_at: null, cdn: '', errors: [], units: [], nothing_to_sync: false }
     const w = mountW({ step: 'releasing', final: { tags: ['t1'], instances: [inst], github_releases: 'skipped', cleanup: 'queued', state: 'failure', url: '' } })
     expect(w.text()).toContain('PR #5 merged')
     expect(w.text()).toContain('Publish the GitHub releases')

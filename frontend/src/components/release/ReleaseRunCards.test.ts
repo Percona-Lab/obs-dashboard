@@ -5,23 +5,35 @@ import ReleaseRunCards from './ReleaseRunCards.vue'
 import type { InstanceCard } from '../../types/release'
 
 const card = (o: Partial<InstanceCard> = {}): InstanceCard => ({
-  instance: 'obs-a', state: 'running', url: 'https://github.com/o/r/actions/runs/1', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [], skipped_units: [], nothing_to_sync: false, ...o,
+  instance: 'obs-a', state: 'running', url: 'https://github.com/o/r/actions/runs/1', started_at: null, finished_at: null, cdn: '', errors: [], units: [], nothing_to_sync: false, ...o,
 })
 
 describe('ReleaseRunCards', () => {
-  it('says so when an instance had nothing to sync, and names units it skipped', () => {
+  it('lists every unit of an instance with its outcome', () => {
     const w = mount(ReleaseRunCards, { props: { cards: [
-      card({ instance: 'labs', state: 'success', nothing_to_sync: true, skipped_units: ['ppg:releases:16:tde'] }),
-      card({ instance: 'mixed', state: 'success', skipped_units: ['ppg:releases:16:tde'] }),
-      card({ instance: 'obs', state: 'success' }),
+      card({ instance: 'boo', state: 'success', units: [{ project: 'ppg:releases:18', outcome: 'success' }, { project: 'ppg:releases:16:tde', outcome: 'success' }] }),
+      card({ instance: 'labs', state: 'success', units: [{ project: 'ppg:releases:18', outcome: 'success' }, { project: 'ppg:releases:16:tde', outcome: 'skipped' }] }),
+      card({ instance: 'bad', state: 'failure', units: [{ project: 'ppg:releases:18', outcome: 'failure' }], errors: ['boom'] }),
+      card({ instance: 'busy', state: 'running', units: [] }),
     ] } })
-    const [labs, mixed, obs] = w.findAll('[data-testid="run-card"]')
+    const [boo, labs, bad, busy] = w.findAll('[data-testid="run-card"]')
+    const rows = (c: typeof boo) => c.findAll('[data-testid="card-unit"]').map((r) => `${r.attributes('data-outcome')}|${r.findAll('span').map((x) => x.text()).join(' ')}`)
+    expect(rows(boo)).toEqual(['success|✓ ppg:releases:18 synced', 'success|✓ ppg:releases:16:tde synced'])
+    expect(rows(labs)).toEqual(['success|✓ ppg:releases:18 synced', 'skipped|– ppg:releases:16:tde not on this instance'])
+    expect(labs.get('[data-testid="card-state"]').text()).toBe('Done')
+    expect(rows(bad)).toEqual(['failure|✗ ppg:releases:18 failed'])
+    expect(bad.text()).toContain('boom')
+    expect(busy.find('[data-testid="card-unit"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('says so when an instance had nothing to sync', () => {
+    const w = mount(ReleaseRunCards, { props: { cards: [
+      card({ instance: 'labs', state: 'success', nothing_to_sync: true, units: [{ project: 'ppg:releases:16:tde', outcome: 'skipped' }] }),
+    ] } })
+    const labs = w.get('[data-testid="run-card"]')
     expect(labs.get('[data-testid="card-state"]').text()).toBe('Nothing to sync')
-    expect(labs.find('[data-testid="card-skipped"]').exists()).toBe(false)
-    expect(mixed.get('[data-testid="card-state"]').text()).toBe('Done')
-    expect(mixed.get('[data-testid="card-skipped"]').text()).toContain('ppg:releases:16:tde')
-    expect(obs.get('[data-testid="card-state"]').text()).toBe('Done')
-    expect(obs.find('[data-testid="card-skipped"]').exists()).toBe(false)
+    expect(labs.get('[data-testid="card-unit"]').text()).toContain('not on this instance')
     w.unmount()
   })
 
@@ -33,7 +45,7 @@ describe('ReleaseRunCards', () => {
   })
 
   it('shows failed units and errors on a failed card', () => {
-    const w = mount(ReleaseRunCards, { props: { cards: [card({ state: 'failure', failed_units: ['ppg-18'], errors: ['boom'] })] } })
+    const w = mount(ReleaseRunCards, { props: { cards: [card({ state: 'failure', units: [{ project: 'ppg-18', outcome: 'failure' }], errors: ['boom'] })] } })
     expect(w.text()).toContain('ppg-18')
     expect(w.text()).toContain('boom')
     const a = w.get('a')

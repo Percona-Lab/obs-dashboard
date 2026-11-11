@@ -94,7 +94,7 @@ func TestSyncCardsPerInstance(t *testing.T) {
 	if cards[1].Instance != "labs" || cards[1].State != "failure" || cards[1].CDN != "" {
 		t.Fatalf("%+v", cards[1])
 	}
-	if cards[0].FailedUnits == nil || cards[0].Errors == nil {
+	if cards[0].Units == nil || cards[0].Errors == nil {
 		t.Fatal("nil slices")
 	}
 }

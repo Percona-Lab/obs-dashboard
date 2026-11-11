@@ -174,6 +174,7 @@ const waitingState = (s: string | undefined) => s === 'queued' || s === 'running
           <div v-else-if="release.sync_state === 'running'" data-testid="sync-waiting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>The sync is starting…</span></div>
           <div v-else-if="release.sync_state === 'queued' || !release.sync_state" data-testid="sync-waiting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>Waiting for the sync to start</span></div>
         </template>
+        <div v-if="release.sync_error" data-testid="sync-error" class="rounded-[10px] border border-fail p-3 text-fail">{{ release.sync_error }}</div>
         <ReleaseRunCards :cards="release.sync" />
         <div v-if="syncFailed && canAct" class="flex items-center gap-3">
           <button type="button" data-testid="retry-sync" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retrySync">Retry sync</button>

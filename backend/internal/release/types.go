@@ -35,20 +35,27 @@ type RunRef struct {
 }
 
 type InstanceCard struct {
-	Instance    string     `json:"instance"`
-	State       RunState   `json:"state"`
-	URL         string     `json:"url"`
-	StartedAt   *time.Time `json:"started_at"`
-	FinishedAt  *time.Time `json:"finished_at"`
-	CDN         string     `json:"cdn"` // "" | queued | running | success | failure | skipped
-	FailedUnits []string   `json:"failed_units"`
-	Errors      []string   `json:"errors"`
-	// SkippedUnits are the release projects the populate report marks
-	// "skipped": this instance holds nothing of them.
-	SkippedUnits []string `json:"skipped_units"`
+	Instance   string     `json:"instance"`
+	State      RunState   `json:"state"`
+	URL        string     `json:"url"`
+	StartedAt  *time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	CDN        string     `json:"cdn"` // "" | queued | running | success | failure | skipped
+	Errors     []string   `json:"errors"`
+	// Units lists each release project of the populate report with its
+	// outcome on this instance. Empty until the job has reported, and for
+	// the cards of the final sync, which has no report.
+	Units []CardUnit `json:"units"`
 	// NothingToSync is true when the job succeeded and every entry of its
 	// report was skipped: the instance had nothing to populate.
 	NothingToSync bool `json:"nothing_to_sync"`
+}
+
+// CardUnit is one release project on one instance. Outcome is "success",
+// "failure" or "skipped" (the instance holds nothing of the project).
+type CardUnit struct {
+	Project string `json:"project"`
+	Outcome string `json:"outcome"`
 }
 
 type Removal struct {
@@ -97,17 +104,20 @@ type AuditEntry struct {
 }
 
 type Release struct {
-	ID        string         `json:"id"`
-	Branch    string         `json:"branch"`
-	PR        int            `json:"pr"`
-	PRURL     string         `json:"pr_url"`
-	HeadSHA   string         `json:"head_sha"`
-	Step      Step           `json:"step"`
-	Dashboard bool           `json:"dashboard"`
-	Units     []UnitState    `json:"units"`
-	Cut       *RunRef        `json:"cut"`
-	SyncState string         `json:"sync_state"`
-	SyncURL   string         `json:"sync_url"` // the run the sync state was read from; "" while none
+	ID        string      `json:"id"`
+	Branch    string      `json:"branch"`
+	PR        int         `json:"pr"`
+	PRURL     string      `json:"pr_url"`
+	HeadSHA   string      `json:"head_sha"`
+	Step      Step        `json:"step"`
+	Dashboard bool        `json:"dashboard"`
+	Units     []UnitState `json:"units"`
+	Cut       *RunRef     `json:"cut"`
+	SyncState string      `json:"sync_state"`
+	SyncURL   string      `json:"sync_url"` // the run the sync state was read from; "" while none
+	// SyncError says why the sync failed when no single instance did: a unit
+	// that every instance skipped was populated nowhere.
+	SyncError string         `json:"sync_error"`
 	Sync      []InstanceCard `json:"sync"`
 	Removals  []Removal      `json:"removals"`
 	QA        *QA            `json:"qa"`

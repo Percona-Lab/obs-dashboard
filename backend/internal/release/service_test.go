@@ -614,13 +614,14 @@ func TestSnapshotRemovalsAndFailedUnits(t *testing.T) {
 		t.Errorf("Removals = %+v", rel.Removals)
 	}
 	obs, labs, none := rel.Sync[0], rel.Sync[1], rel.Sync[2]
-	if !reflect.DeepEqual(obs.FailedUnits, []string{"ppg:releases:18"}) || !reflect.DeepEqual(obs.Errors, []string{"staging not green"}) {
+	wantObs := []CardUnit{{Project: "ppg:releases:18", Outcome: "failure"}, {Project: "ppg:releases:18:containers", Outcome: "success"}}
+	if !reflect.DeepEqual(obs.Units, wantObs) || !reflect.DeepEqual(obs.Errors, []string{"staging not green"}) {
 		t.Errorf("obs card = %+v", obs)
 	}
-	if len(labs.FailedUnits) != 0 || len(labs.Errors) != 0 {
+	if !reflect.DeepEqual(labs.Units, []CardUnit{{Project: "ppg:releases:18", Outcome: "success"}}) || len(labs.Errors) != 0 {
 		t.Errorf("labs card = %+v", labs)
 	}
-	if none.FailedUnits == nil || len(none.FailedUnits) != 0 || none.Errors == nil || len(none.Errors) != 0 {
+	if none.Units == nil || len(none.Units) != 0 || none.Errors == nil || len(none.Errors) != 0 {
 		t.Errorf("card without report = %+v", none)
 	}
 
@@ -1666,8 +1667,8 @@ func TestSnapshotCutUnitsEmptyOtherwise(t *testing.T) {
 }
 
 // An instance that holds none of a unit's projects reports outcome "skipped"
-// for it: that is not a failure, and a card with nothing but skipped entries
-// had nothing to sync.
+// for it: that is not a failure. Every card lists each unit with its outcome,
+// and a card with nothing but skipped entries had nothing to sync.
 func TestSnapshotPopulateSkippedOutcome(t *testing.T) {
 	fx := newFixture(t)
 	fx.withBranch()
@@ -1678,35 +1679,41 @@ func TestSnapshotPopulateSkippedOutcome(t *testing.T) {
 		populateJob(102, "mixed", "completed", "success"),
 	)
 	fx.gh.artifacts["10:"+ArtifactReportPrefix+"obs"] = []byte(
-		`[{"project":"ppg:releases:16:tde","outcome":"success","removals":[]}]`)
+		`[{"project":"ppg:releases:16:tde","outcome":"success","removals":[]},
+		  {"project":"ppg:releases:18","outcome":"success","removals":[]}]`)
 	fx.gh.artifacts["10:"+ArtifactReportPrefix+"labs"] = []byte(
-		`[{"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+		`[{"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]},
+		  {"project":"ppg:releases:18","outcome":"skipped","removals":[]}]`)
 	fx.gh.artifacts["10:"+ArtifactReportPrefix+"mixed"] = []byte(
 		`[{"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]},
 		  {"project":"ppg:releases:18","outcome":"success","removals":[]}]`)
 
 	rel := fx.oneRelease(t)
-	if rel.SyncState != string(StateSuccess) || len(rel.Sync) != 3 {
-		t.Fatalf("SyncState=%q Sync=%+v", rel.SyncState, rel.Sync)
+	if rel.SyncState != string(StateSuccess) || rel.SyncError != "" || len(rel.Sync) != 3 {
+		t.Fatalf("SyncState=%q SyncError=%q Sync=%+v", rel.SyncState, rel.SyncError, rel.Sync)
 	}
 	obs, labs, mixed := rel.Sync[0], rel.Sync[1], rel.Sync[2]
-	if obs.NothingToSync || len(obs.SkippedUnits) != 0 || obs.SkippedUnits == nil {
+	if obs.NothingToSync || !reflect.DeepEqual(obs.Units, []CardUnit{{"ppg:releases:16:tde", "success"}, {"ppg:releases:18", "success"}}) {
 		t.Errorf("obs card = %+v", obs)
 	}
-	if !labs.NothingToSync || !reflect.DeepEqual(labs.SkippedUnits, []string{"ppg:releases:16:tde"}) ||
-		len(labs.FailedUnits) != 0 || labs.State != StateSuccess {
+	if !labs.NothingToSync || labs.State != StateSuccess ||
+		!reflect.DeepEqual(labs.Units, []CardUnit{{"ppg:releases:16:tde", "skipped"}, {"ppg:releases:18", "skipped"}}) {
 		t.Errorf("labs card = %+v", labs)
 	}
-	if mixed.NothingToSync || !reflect.DeepEqual(mixed.SkippedUnits, []string{"ppg:releases:16:tde"}) || len(mixed.FailedUnits) != 0 {
+	if mixed.NothingToSync || !reflect.DeepEqual(mixed.Units, []CardUnit{{"ppg:releases:16:tde", "skipped"}, {"ppg:releases:18", "success"}}) {
 		t.Errorf("mixed card = %+v", mixed)
 	}
 	b, err := json.Marshal(labs)
-	if err != nil || !strings.Contains(string(b), `"skipped_units":["ppg:releases:16:tde"]`) || !strings.Contains(string(b), `"nothing_to_sync":true`) {
+	if err != nil || !strings.Contains(string(b), `"units":[{"project":"ppg:releases:16:tde","outcome":"skipped"},`) || !strings.Contains(string(b), `"nothing_to_sync":true`) {
 		t.Errorf("json = %s err = %v", b, err)
+	}
+	if strings.Contains(string(b), "failed_units") || strings.Contains(string(b), "skipped_units") {
+		t.Errorf("old fields still sent: %s", b)
 	}
 }
 
-// A skipped entry next to a failed one is not listed as failed.
+// A skipped entry next to a failed one keeps its own outcome; an unknown
+// outcome is reported as a failure.
 func TestSnapshotPopulateSkippedIsNotFailed(t *testing.T) {
 	fx := newFixture(t)
 	fx.withBranch()
@@ -1714,9 +1721,63 @@ func TestSnapshotPopulateSkippedIsNotFailed(t *testing.T) {
 	fx.withPRRun("completed", "failure", populateJob(100, "obs", "completed", "failure"))
 	fx.gh.artifacts["10:"+ArtifactReportPrefix+"obs"] = []byte(
 		`[{"project":"ppg:releases:18","outcome":"failure","removals":[]},
-		  {"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+		  {"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]},
+		  {"project":"ppg:releases:17","outcome":"weird","removals":[]}]`)
 	card := fx.oneRelease(t).Sync[0]
-	if !reflect.DeepEqual(card.FailedUnits, []string{"ppg:releases:18"}) || card.NothingToSync {
+	want := []CardUnit{{"ppg:releases:18", "failure"}, {"ppg:releases:16:tde", "skipped"}, {"ppg:releases:17", "failure"}}
+	if !reflect.DeepEqual(card.Units, want) || card.NothingToSync {
 		t.Errorf("card = %+v", card)
+	}
+}
+
+// A unit is populated when every instance reports success or skipped and at
+// least one reports success. A unit skipped everywhere was populated nowhere:
+// the sync failed, even though every job succeeded.
+func TestSnapshotUnitPopulatedNowhereFailsTheSync(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withPR(LabelSync)
+	fx.withPRRun("completed", "success",
+		populateJob(100, "obs", "completed", "success"),
+		populateJob(101, "labs", "completed", "success"),
+	)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"obs"] = []byte(
+		`[{"project":"ppg:releases:18","outcome":"success","removals":[]},
+		  {"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"labs"] = []byte(
+		`[{"project":"ppg:releases:18","outcome":"skipped","removals":[]},
+		  {"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+	rel := fx.oneRelease(t)
+	if rel.Step != StepSync || rel.SyncState != string(StateFailure) {
+		t.Fatalf("Step=%q SyncState=%q, want sync/failure", rel.Step, rel.SyncState)
+	}
+	if rel.SyncError != "ppg:releases:16:tde was not populated on any instance." {
+		t.Errorf("SyncError = %q", rel.SyncError)
+	}
+	// QA cannot be approved, and the sync can be retried.
+	ctx := context.Background()
+	if err := fx.svc.ApproveQA(ctx, actor, rel.ID, rel.HeadSHA); !errors.Is(err, ErrConflict) {
+		t.Errorf("ApproveQA: err = %v, want a conflict", err)
+	}
+	if err := fx.svc.RetrySync(ctx, actor, rel.ID, rel.HeadSHA); err != nil {
+		t.Errorf("RetrySync: err = %v", err)
+	}
+}
+
+// The rule is only applied once every instance has reported: a missing
+// report must not make a unit look populated nowhere.
+func TestSnapshotUnitRuleNeedsEveryReport(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withPR(LabelSync)
+	fx.withPRRun("completed", "success",
+		populateJob(100, "obs", "completed", "success"),
+		populateJob(101, "labs", "completed", "success"),
+	)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"labs"] = []byte(
+		`[{"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+	rel := fx.oneRelease(t)
+	if rel.SyncState != string(StateSuccess) || rel.SyncError != "" {
+		t.Errorf("SyncState=%q SyncError=%q, want success with no error", rel.SyncState, rel.SyncError)
 	}
 }

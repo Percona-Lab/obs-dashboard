@@ -345,13 +345,10 @@ type mainUnit struct {
 }
 
 type jobReport struct {
-	failedUnits []string
-	// skippedUnits are the entries with outcome "skipped"; entries counts
-	// every entry of the report.
-	skippedUnits []string
-	entries      int
-	removals     []Removal
-	errors       []string
+	// units is every entry of the report with its outcome.
+	units    []CardUnit
+	removals []Removal
+	errors   []string
 }
 
 type tagPull struct {
@@ -887,17 +884,35 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 	if syncRun != nil {
 		rel.SyncURL, rel.syncRunDone = syncRun.HTMLURL, syncRun.Status == "completed"
 		seen := map[Removal]bool{}
+		// Per release project: was it populated on some instance?
+		populated, order := map[string]bool{}, []string{}
+		reported := 0
 		for _, j := range f.Jobs[syncRun.ID] {
 			inst, ok := InstanceOf(j.Name, JobPopulatePrefix)
 			if !ok || isSkipped(j) || j.Status != "completed" {
 				continue
 			}
 			rep := s.populateReport(ctx, *syncRun, j, inst)
+			if len(rep.units) > 0 {
+				reported++
+			}
+			skipped := 0
+			for _, u := range rep.units {
+				if _, known := populated[u.Project]; !known {
+					populated[u.Project] = false
+					order = append(order, u.Project)
+				}
+				switch u.Outcome {
+				case "success":
+					populated[u.Project] = true
+				case "skipped":
+					skipped++
+				}
+			}
 			for i := range cards {
 				if cards[i].Instance == inst {
-					cards[i].FailedUnits = append(cards[i].FailedUnits, rep.failedUnits...)
-					cards[i].SkippedUnits = append(cards[i].SkippedUnits, rep.skippedUnits...)
-					cards[i].NothingToSync = cards[i].State == StateSuccess && rep.entries > 0 && len(rep.skippedUnits) == rep.entries
+					cards[i].Units = append(cards[i].Units, rep.units...)
+					cards[i].NothingToSync = cards[i].State == StateSuccess && len(rep.units) > 0 && skipped == len(rep.units)
 					cards[i].Errors = append(cards[i].Errors, rep.errors...)
 				}
 			}
@@ -906,6 +921,25 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 					seen[r] = true
 					rel.Removals = append(rel.Removals, r)
 				}
+			}
+		}
+		// A unit is populated when every instance reports success or skipped
+		// and at least one reports success. Only judged once every instance
+		// has reported, so a missing report cannot make a unit look skipped
+		// everywhere.
+		if state == string(StateSuccess) && len(cards) > 0 && reported == len(cards) {
+			for _, project := range order {
+				if !populated[project] {
+					f.Unpopulated = append(f.Unpopulated, project)
+				}
+			}
+			if len(f.Unpopulated) > 0 {
+				rel.SyncState = string(StateFailure)
+				verb := "was"
+				if len(f.Unpopulated) > 1 {
+					verb = "were"
+				}
+				rel.SyncError = strings.Join(f.Unpopulated, ", ") + " " + verb + " not populated on any instance."
 			}
 		}
 	}
@@ -1013,16 +1047,14 @@ func (s *Service) populateReport(ctx context.Context, run Run, j Job, instance s
 			Removals []string `json:"removals"`
 		}
 		if json.Unmarshal(data, &entries) == nil {
-			rep.entries = len(entries)
 			for _, e := range entries {
-				switch e.Outcome {
-				case "success":
-				case "skipped":
-					// The instance holds nothing of this project.
-					rep.skippedUnits = append(rep.skippedUnits, e.Project)
-				default:
-					rep.failedUnits = append(rep.failedUnits, e.Project)
+				// "skipped": the instance holds nothing of this project.
+				// Anything unknown is shown as a failure.
+				outcome := e.Outcome
+				if outcome != "success" && outcome != "skipped" {
+					outcome = "failure"
 				}
+				rep.units = append(rep.units, CardUnit{Project: e.Project, Outcome: outcome})
 				for _, item := range e.Removals {
 					rep.removals = append(rep.removals, Removal{Project: e.Project, Item: item})
 				}
