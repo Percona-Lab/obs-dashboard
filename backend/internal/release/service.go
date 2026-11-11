@@ -668,9 +668,15 @@ func (s *Service) heldCuts(runs []Run, now time.Time) ([]Run, map[string]Run, er
 	if err != nil {
 		return nil, nil, fmt.Errorf("release audit: %w", err)
 	}
-	for _, r := range waiting {
-		branch, best := "", time.Duration(0)
-		for _, a := range rows {
+	// One-to-one: take the (run, row) pairs in the window by smallest time
+	// distance, each run and each row used at most once.
+	type pair struct {
+		run, row int
+		d        time.Duration
+	}
+	var pairs []pair
+	for i, r := range waiting {
+		for j, a := range rows {
 			d := r.CreatedAt.Sub(a.At)
 			if d < -heldBefore || d > heldAfter {
 				continue
@@ -678,15 +684,40 @@ func (s *Service) heldCuts(runs []Run, now time.Time) ([]Run, map[string]Run, er
 			if d < 0 {
 				d = -d
 			}
-			if branch == "" || d < best {
-				branch, best = a.Branch, d
-			}
+			pairs = append(pairs, pair{i, j, d})
 		}
-		if branch == "" {
+	}
+	sort.SliceStable(pairs, func(x, y int) bool { return pairs[x].d < pairs[y].d })
+	usedRun, usedRow := map[int]bool{}, map[int]bool{}
+	matchedAt := map[string]time.Time{}
+	for _, p := range pairs {
+		if usedRun[p.run] || usedRow[p.row] {
 			continue
 		}
-		if cur, ok := held[branch]; !ok || newer(r, cur) {
-			held[branch] = r
+		usedRun[p.run], usedRow[p.row] = true, true
+		r, a := waiting[p.run], rows[p.row]
+		if cur, ok := held[a.Branch]; !ok || newer(r, cur) {
+			held[a.Branch] = r
+			matchedAt[a.Branch] = a.At
+		}
+	}
+	// A branch abandoned after the dispatch the run belongs to is gone: the
+	// run stays listed on GitHub but accounts for nothing.
+	if len(held) > 0 {
+		names := make([]string, 0, len(held))
+		for b := range held {
+			names = append(names, b)
+		}
+		byBranch, err := store.ReleaseAuditByBranch(s.db, names)
+		if err != nil {
+			return nil, nil, fmt.Errorf("release audit: %w", err)
+		}
+		for b, at := range matchedAt {
+			if rs := byBranch[b]; len(rs) > 0 {
+				if last := rs[len(rs)-1]; last.Action == auditAbandon && last.At.After(at) {
+					delete(held, b)
+				}
+			}
 		}
 	}
 	return started, held, nil

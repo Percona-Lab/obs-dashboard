@@ -1404,3 +1404,119 @@ func TestSnapshotHeldRecutExpires(t *testing.T) {
 		t.Fatalf("step=%q cut=%+v", rel.Step, rel.Cut)
 	}
 }
+
+// Abandoning a held re-cut deletes the branch and closes the PR: the held run
+// stays listed on GitHub but the release does not come back.
+func TestSnapshotHeldRecutAbandonedStaysGone(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBuiltUnits()
+	fx.atChangelog(LabelSync)
+	fx.heldAfter(t, "recut", "ppg:staging:18")
+	ctx := context.Background()
+	if rel := fx.oneRelease(t); rel.Cut == nil || rel.Cut.State != StateApproval {
+		t.Fatalf("before: cut = %+v", rel.Cut)
+	}
+	if err := fx.svc.Abandon(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if c := fx.gh.callsOf("ClosePull"); len(c) != 1 {
+		t.Errorf("ClosePull = %v", c)
+	}
+	if c := fx.gh.callsOf("DeleteBranch"); len(c) != 1 {
+		t.Errorf("DeleteBranch = %v", c)
+	}
+	fx.clock.advance(time.Second)
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v, want none", snap.Releases)
+	}
+	rows, err := fx.svc.Units(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := rows[0].Blocked; b != nil && b.Reason == "in_flight" {
+		t.Errorf("unit still in flight: %+v", b)
+	}
+}
+
+// Two cuts dispatched close together each get their own held run.
+func TestSnapshotHeldRunsMatchedOneToOne(t *testing.T) {
+	fx := newFixture(t)
+	other := "release/20261111T150000"
+	t0 := fx.clock.now()
+	for i, b := range []string{testBranch, other} {
+		err := store.AddReleaseAudit(fx.db, store.ReleaseAudit{At: t0.Add(time.Duration(i) * 10 * time.Second), Email: actor, Action: "cut", Branch: b, Detail: "ppg:staging:18"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	fx.gh.mu.Lock()
+	fx.gh.runs = append(fx.gh.runs,
+		Run{ID: 7, Name: "OBS Release Cut", WorkflowFile: WorkflowCut, Status: "completed", Conclusion: "action_required", HTMLURL: "https://github.com/run/7", CreatedAt: t0.Add(5 * time.Second)},
+		Run{ID: 8, Name: "OBS Release Cut", WorkflowFile: WorkflowCut, Status: "completed", Conclusion: "action_required", HTMLURL: "https://github.com/run/8", CreatedAt: t0.Add(15 * time.Second)},
+	)
+	fx.gh.mu.Unlock()
+	fx.clock.advance(20 * time.Second)
+	snap := fx.snapshot(t)
+	if len(snap.Releases) != 2 {
+		t.Fatalf("releases = %+v", snap.Releases)
+	}
+	want := map[string]string{testBranch: "https://github.com/run/7", other: "https://github.com/run/8"}
+	for _, r := range snap.Releases {
+		if r.Cut == nil || r.Cut.State != StateApproval || r.Cut.URL != want[r.Branch] {
+			t.Errorf("%s: cut = %+v, want url %s", r.Branch, r.Cut, want[r.Branch])
+		}
+	}
+}
+
+// Two cuts in the window but one held run: only the closest branch is held.
+func TestSnapshotOneHeldRunTwoCutsClosestWins(t *testing.T) {
+	fx := newFixture(t)
+	other := "release/20261111T150000"
+	t0 := fx.clock.now()
+	for i, b := range []string{testBranch, other} {
+		err := store.AddReleaseAudit(fx.db, store.ReleaseAudit{At: t0.Add(time.Duration(i) * 10 * time.Second), Email: actor, Action: "cut", Branch: b, Detail: "ppg:staging:18"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	fx.gh.mu.Lock()
+	fx.gh.runs = append(fx.gh.runs,
+		Run{ID: 8, Name: "OBS Release Cut", WorkflowFile: WorkflowCut, Status: "completed", Conclusion: "action_required", HTMLURL: "https://github.com/run/8", CreatedAt: t0.Add(15 * time.Second)},
+	)
+	fx.gh.mu.Unlock()
+	fx.clock.advance(20 * time.Second)
+	rel := fx.oneRelease(t)
+	if rel.Branch != other || rel.Cut == nil || rel.Cut.State != StateApproval || rel.Cut.URL != "https://github.com/run/8" {
+		t.Fatalf("release = %+v cut = %+v", rel, rel.Cut)
+	}
+}
+
+// Independent closest-row matching would give both runs to the second cut.
+func TestSnapshotHeldRunsOneToOneNotIndependent(t *testing.T) {
+	fx := newFixture(t)
+	other := "release/20261111T150000"
+	t0 := fx.clock.now()
+	for i, b := range []string{testBranch, other} {
+		err := store.AddReleaseAudit(fx.db, store.ReleaseAudit{At: t0.Add(time.Duration(i) * 10 * time.Second), Email: actor, Action: "cut", Branch: b, Detail: "ppg:staging:18"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	fx.gh.mu.Lock()
+	fx.gh.runs = append(fx.gh.runs,
+		Run{ID: 7, Name: "OBS Release Cut", WorkflowFile: WorkflowCut, Status: "completed", Conclusion: "action_required", HTMLURL: "https://github.com/run/7", CreatedAt: t0.Add(9 * time.Second)},
+		Run{ID: 8, Name: "OBS Release Cut", WorkflowFile: WorkflowCut, Status: "completed", Conclusion: "action_required", HTMLURL: "https://github.com/run/8", CreatedAt: t0.Add(12 * time.Second)},
+	)
+	fx.gh.mu.Unlock()
+	fx.clock.advance(20 * time.Second)
+	snap := fx.snapshot(t)
+	if len(snap.Releases) != 2 {
+		t.Fatalf("releases = %+v", snap.Releases)
+	}
+	want := map[string]string{other: "https://github.com/run/7", testBranch: "https://github.com/run/8"}
+	for _, r := range snap.Releases {
+		if r.Cut == nil || r.Cut.State != StateApproval || r.Cut.URL != want[r.Branch] {
+			t.Errorf("%s: cut = %+v, want url %s", r.Branch, r.Cut, want[r.Branch])
+		}
+	}
+}
