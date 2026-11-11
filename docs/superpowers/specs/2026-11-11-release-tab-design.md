@@ -150,8 +150,9 @@ link to the run on GitHub **(user: option A)**.
 When populate is done, the packages and subprojects that the release would
 delete from the release projects (the hop-2 dry-run result) are listed.
 
-On failure: the failure text of the instance's pre-release PR comment, a
-"Retry sync" button (dispatches `obs-release-pr.yml` with the PR number), and
+On failure: which units failed (from the instance's populate report) and the
+error annotations of the failed job, a "Retry sync" button (removes and
+re-adds `obs-sync`, which re-runs populate for the PR head), and
 "Update to latest main & restart" (§ 4.7) **(my call)**.
 
 ### 4.5 Step 4: QA
@@ -302,16 +303,18 @@ row for its branch) and who performed each later step. Releases with no rows
 
 ### 5.3 Reading state
 
-State is derived from: open and recently merged PRs whose head branch starts
-with `release/`, their labels, their changed `release.yaml` files, the runs
-of the cut workflow, `obs-release-pr.yml` and `obs-release.yml`, the jobs and
-annotations of those runs, and the per-instance pre-release PR comments.
+State is derived from: open and recently merged PRs that change a
+`release.yaml`, their labels, the `release/*` branches, the runs of the cut
+workflow, the `obs-release-pr.yml` runs for the PR head SHA, `obs-release.yml`
+runs, the jobs and annotations of those runs, and the populate report
+artifacts.
 
-The backend refreshes this from GitHub only while at least one client has the
-Release tab open, every 15 seconds, using conditional requests, and pushes
-changes to clients over the existing stream. Design for up to five releases
-in flight. No GitHub
-webhook is used **(my call)**.
+The backend keeps the derived state in memory and refreshes it from GitHub
+on demand: a request finds it fresh if it is younger than 15 seconds,
+otherwise one refresh runs (concurrent requests share it), using conditional
+requests. The Release tab polls every 15 seconds while it is visible, so
+GitHub is only queried while someone is looking. No GitHub webhook and no
+server push is used **(my call)**. Design for up to five releases in flight.
 
 ## 6. What obs-packaging must provide
 
@@ -334,13 +337,15 @@ rename them.
 2. **Sync gate.** `obs-release-pr.yml` populates only when the PR carries
    `obs-sync`: on `labeled` with `obs-sync`, on a push to a PR that already
    has it, and on `workflow_dispatch`. A push to a PR without the label does
-   nothing. `qa-release` behaviour is unchanged.
+   nothing. `qa-release` behaviour is unchanged. QA lane job names contain
+   `OBS QA / `.
 3. **Jenkins annotation.** Each QA lane job emits a notice annotation titled
    `Jenkins build` whose message is `<release project> <jenkins build url>`,
    readable through the Checks API while the job runs **(user: annotation,
    added in obs-packaging)**.
 4. **Run names.** `obs-release.yml` runs are named `Release PR #<N>`, so a
-   release's final sync can be found.
+   release's final sync can be found. (`obs-release-pr.yml` runs are found by
+   the PR head SHA; the dashboard never dispatches that workflow.)
 5. **Unit list.** `docs/versions/release-units.json` on `main`, kept current
    by CI: a list of `{unit, members[], release_project, release_dir}`. The dashboard never applies the `containers`/`tarballs`
    bundling rule itself **(my call)**.
