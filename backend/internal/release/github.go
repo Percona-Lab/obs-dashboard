@@ -399,7 +399,8 @@ func (c *Client) OpenPulls(ctx context.Context) ([]Pull, error) {
 	return out, nil
 }
 
-// MergedPulls lists merged PRs updated at or after since, newest first.
+// MergedPulls lists PRs merged at or after since, newest first by update. A PR
+// is never merged after it was last updated, so the listing stops there.
 func (c *Client) MergedPulls(ctx context.Context, since time.Time) ([]Pull, error) {
 	var out []Pull
 	err := pages(ctx, c, c.repoPath("pulls?state=closed&sort=updated&direction=desc&per_page=100"), 0,
@@ -407,7 +408,7 @@ func (c *Client) MergedPulls(ctx context.Context, since time.Time) ([]Pull, erro
 			if g.UpdatedAt.Before(since) {
 				return false
 			}
-			if g.MergedAt != nil {
+			if g.MergedAt != nil && !g.MergedAt.Before(since) {
 				out = append(out, g.pull())
 			}
 			return true

@@ -1520,3 +1520,104 @@ func TestSnapshotHeldRunsOneToOneNotIndependent(t *testing.T) {
 		}
 	}
 }
+
+const (
+	testYAML17 = "root/ppg/releases/17/extras/release.yaml"
+	yaml17     = "project: ppg:staging:17:extras\nreleases:\n  - tag: ppg/17.11-5\n    source_commit: ccc\n"
+)
+
+// withMergedTwoUnits adds a merged release PR of two units (tags ppg/17.11-5
+// and ppg/18.6-5) and release runs that all carry the pre-contract title.
+func (fx *svcFixture) withMergedTwoUnits(number int) {
+	merged := fx.clock.now().Add(-time.Hour)
+	sha := fmt.Sprintf("merge%d", number)
+	fx.gh.merged = append(fx.gh.merged, Pull{
+		Number: number, HeadRef: fmt.Sprintf("x%d", number), HeadSHA: fmt.Sprintf("h%d", number), HeadRepo: fakeRepo, BaseRepo: fakeRepo,
+		State: "closed", MergedAt: &merged, MergeSHA: sha,
+	})
+	fx.gh.pullFiles[number] = []string{testYAML, testYAML17}
+	fx.gh.setFile(sha, testYAML, mainYAML)
+	fx.gh.setFile(sha, testYAML17, yaml17)
+	fx.gh.runs = append(fx.gh.runs, Run{ID: int64(900 + number), Name: "OBS Release", WorkflowFile: WorkflowRelease,
+		Status: "completed", Conclusion: "success", CreatedAt: fx.clock.now()})
+}
+
+func (fx *svcFixture) publish(tags ...string) {
+	for _, tag := range tags {
+		fx.gh.releases = append(fx.gh.releases, GHRelease{Tag: tag, PublishedAt: fx.clock.now()})
+	}
+}
+
+func TestSnapshotMergedWithoutNamedRunAndReleasesIsFinished(t *testing.T) {
+	fx := newFixture(t)
+	fx.withMergedTwoUnits(234)
+	fx.publish("ppg/17.11-5", "ppg/18.6-5")
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v, want none", snap.Releases)
+	}
+	rows, err := fx.svc.Units(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Blocked != nil && r.Blocked.Reason == "in_flight" {
+			t.Errorf("unit %s is in flight: %+v", r.Unit, r.Blocked)
+		}
+	}
+}
+
+func TestSnapshotMergedWithoutNamedRunMissingOneReleaseStaysListed(t *testing.T) {
+	fx := newFixture(t)
+	fx.withMergedTwoUnits(234)
+	fx.publish("ppg/18.6-5")
+	if rel := fx.oneRelease(t); rel.Step != StepReleasing || rel.PR != 234 {
+		t.Fatalf("release = %+v", rel)
+	}
+}
+
+func TestSnapshotMergedNamedRunStillDecides(t *testing.T) {
+	fx := newFixture(t)
+	fx.withMergedTwoUnits(234)
+	fx.publish("ppg/17.11-5", "ppg/18.6-5")
+	fx.gh.runs = append(fx.gh.runs, Run{ID: 20, Name: ReleaseRunName(234), WorkflowFile: WorkflowRelease,
+		Status: "in_progress", CreatedAt: fx.clock.now()})
+	fx.gh.jobs[20] = []Job{{ID: 300, Name: JobCopyPrefix + "obs)", Status: "in_progress"}}
+	if rel := fx.oneRelease(t); rel.Step != StepReleasing {
+		t.Fatalf("release = %+v", rel)
+	}
+	if n := len(fx.gh.callsOf("Releases")); n != 0 {
+		t.Errorf("Releases called %d times with a named run", n)
+	}
+}
+
+func TestSnapshotMergedUnresolvableWithoutNamedRunNotListed(t *testing.T) {
+	fx := newFixture(t)
+	fx.withMergedTwoUnits(234)
+	fx.gh.mu.Lock()
+	delete(fx.gh.files, "merge234:"+testYAML)
+	delete(fx.gh.files, "merge234:"+testYAML17)
+	fx.gh.mu.Unlock()
+	fx.gh.fileErrs["merge234:"+testYAML] = fakeNotFound("f")
+	fx.gh.fileErrs["merge234:"+testYAML17] = fakeNotFound("f")
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v, want none", snap.Releases)
+	}
+}
+
+func TestSnapshotReleaseTagCacheNotRefetched(t *testing.T) {
+	fx := newFixture(t)
+	fx.withMergedTwoUnits(234)
+	fx.publish("ppg/17.11-5", "ppg/18.6-5")
+	fx.snapshot(t)
+	if n := len(fx.gh.callsOf("Releases")); n != 1 {
+		t.Fatalf("Releases calls = %d, want 1", n)
+	}
+	fx.withMergedTwoUnits(235)
+	fx.svc.Invalidate()
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v, want none", snap.Releases)
+	}
+	if n := len(fx.gh.callsOf("Releases")); n != 1 {
+		t.Errorf("Releases calls = %d after second refresh, want 1", n)
+	}
+}
