@@ -109,6 +109,9 @@ type Release struct {
 	StartedBy string         `json:"started_by"`
 	StartedAt *time.Time     `json:"started_at"`
 	Actions   []AuditEntry   `json:"actions"`
+	// CutUnits names the unit roots the dashboard asked to cut, while Units
+	// is still empty (the cut has not produced them yet). Empty otherwise.
+	CutUnits []string `json:"cut_units"`
 
 	// Not sent to the browser: what the action guards need beyond the above.
 	syncRunDone  bool     // the run behind SyncState has completed

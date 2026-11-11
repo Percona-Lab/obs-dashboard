@@ -42,7 +42,7 @@ const when = (iso: string) => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
 }
-const label = computed(() => props.release.units.length ? props.release.units.map((u) => u.release_id).join(' · ') : props.release.id)
+const label = computed(() => props.release.units.length ? props.release.units.map((u) => u.release_id).join(' · ') : props.release.cut_units?.length ? props.release.cut_units.join(' · ') : props.release.id)
 
 // The dialog pins the release id and head the user was looking at when it opened.
 const dialog = ref<{ kind: 'abandon' | 'recut'; id: string; head: string } | null>(null)

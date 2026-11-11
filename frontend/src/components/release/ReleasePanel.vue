@@ -104,7 +104,7 @@ const when = (iso: string | null) => {
         <ul v-else data-testid="release-in-flight" class="m-0 flex list-none flex-col gap-[6px] p-0">
           <li v-for="r in releases" :key="r.id" :data-release="r.id" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-border px-3 py-[10px]">
             <button type="button" data-testid="open-in-flight" class="cursor-pointer border-0 bg-transparent p-0 font-mono text-[13px] font-semibold text-brand-purple" @click="selectedId = r.id">
-              {{ r.units.length ? r.units.map((u) => u.release_id).join(', ') : r.id }}
+              {{ r.units.length ? r.units.map((u) => u.release_id).join(', ') : r.cut_units?.length ? r.cut_units.join(', ') : r.id }}
             </button>
             <a v-if="r.pr && safeHref(r.pr_url)" :href="safeHref(r.pr_url)" target="_blank" rel="noopener noreferrer" class="text-[12px] text-brand-purple">PR #{{ r.pr }}</a>
             <span class="text-[12px] text-text-muted">started by {{ r.started_by || 'unknown' }}<template v-if="when(r.started_at)"> · {{ when(r.started_at) }}</template></span>

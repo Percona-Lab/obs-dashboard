@@ -1621,3 +1621,46 @@ func TestSnapshotReleaseTagCacheNotRefetched(t *testing.T) {
 		t.Errorf("Releases calls = %d after second refresh, want 1", n)
 	}
 }
+
+// While a cut has not produced its units yet, the release names the units
+// that were asked for, from the dashboard's own audit row.
+func TestSnapshotCutUnitsWhileCutting(t *testing.T) {
+	fx := newFixture(t)
+	fx.recordCut(t, "cut", "ppg:staging:16:tde ppg:staging:18")
+	fx.withCutRun("in_progress", "")
+	rel := fx.oneRelease(t)
+	if rel.Step != StepCutting || len(rel.Units) != 0 {
+		t.Fatalf("release = %+v", rel)
+	}
+	if got := strings.Join(rel.CutUnits, " "); got != "ppg:staging:16:tde ppg:staging:18" {
+		t.Errorf("CutUnits = %q", got)
+	}
+	b, err := json.Marshal(rel)
+	if err != nil || !strings.Contains(string(b), `"cut_units":["ppg:staging:16:tde","ppg:staging:18"]`) {
+		t.Errorf("json = %s err = %v", b, err)
+	}
+}
+
+// Once the units are resolved, or when the cut was not made from the
+// dashboard, cut_units is an empty list, never null.
+func TestSnapshotCutUnitsEmptyOtherwise(t *testing.T) {
+	fx := newFixture(t)
+	fx.withCutRun("in_progress", "")
+	b, err := json.Marshal(fx.oneRelease(t))
+	if err != nil || !strings.Contains(string(b), `"cut_units":[]`) {
+		t.Errorf("no audit row: json = %s err = %v", b, err)
+	}
+
+	fx = newFixture(t)
+	fx.recordCut(t, "cut", "ppg:staging:18")
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.withPR()
+	rel := fx.oneRelease(t)
+	if len(rel.Units) == 0 {
+		t.Fatalf("fixture has no resolved units: %+v", rel)
+	}
+	if len(rel.CutUnits) != 0 {
+		t.Errorf("CutUnits = %v, want none once units are resolved", rel.CutUnits)
+	}
+}
