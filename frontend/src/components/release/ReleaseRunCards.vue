@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { safeHref } from '../../lib/safeHref'
 import type { InstanceCard } from '../../types/release'
 
-defineProps<{ cards: InstanceCard[] }>()
+const props = defineProps<{ cards: InstanceCard[] }>()
 
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
+const active = computed(() => props.cards.some((c) => c.state === 'queued' || c.state === 'running'))
+watch(active, (on) => {
+  if (on && !timer) {
+    now.value = Date.now()
+    timer = setInterval(() => { now.value = Date.now() }, 1000)
+  } else if (!on && timer) {
+    clearInterval(timer)
+    timer = undefined
+  }
+}, { immediate: true })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+const cdnNote = (c: InstanceCard) => c.cdn && c.cdn !== 'success' && c.cdn !== 'skipped' ? `Download servers: ${c.cdn}` : ''
 
 function elapsed(c: InstanceCard): string {
   const start = c.started_at ? new Date(c.started_at).getTime() : NaN
@@ -36,6 +46,7 @@ const LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', su
         <small v-if="elapsed(c)" data-testid="card-elapsed" class="text-text-muted">{{ elapsed(c) }}</small>
         <a v-if="safeHref(c.url)" :href="safeHref(c.url)" target="_blank" rel="noopener noreferrer" class="ml-auto text-[12px] text-brand-purple">View log on GitHub</a>
       </div>
+      <div v-if="cdnNote(c)" data-testid="card-cdn" class="mt-1 text-[12px] text-warn">{{ cdnNote(c) }}</div>
       <div v-if="c.state === 'failure'" data-testid="card-failure" class="mt-2 text-[12px]">
         <div v-if="c.failed_units.length" class="text-fail">Failed units: <span class="font-mono">{{ c.failed_units.join(', ') }}</span></div>
         <ul v-if="c.errors.length" class="m-0 mt-1 list-disc pl-5 text-text-secondary">

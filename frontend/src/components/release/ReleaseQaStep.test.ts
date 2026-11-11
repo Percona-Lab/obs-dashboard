@@ -87,4 +87,23 @@ describe('ReleaseQaStep', () => {
     const r = mountQ({ state: 'running', lanes: [lane({ state: 'running' })] })
     expect(r.find('[data-testid="approve-qa"]').exists()).toBe(false)
   })
+
+  it('confirming after QA went back to running does not release', async () => {
+    const w = mountQ({ state: 'finished', lanes: [lane({})] })
+    await w.get('[data-testid="release"]').trigger('click')
+    await w.setProps({ release: rel({ state: 'running', lanes: [lane({ state: 'running' })] }) })
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(act).not.toHaveBeenCalled()
+    expect(w.find('[data-testid="release-confirm"]').exists()).toBe(false)
+  })
+
+  it('an unfinished lane counts as failed for the confirmation', async () => {
+    const w = mountQ({ state: 'finished', lanes: [lane({ name: 'odd-lane', state: 'running' })] })
+    await w.get('[data-testid="release"]').trigger('click')
+    expect(w.get('[data-testid="release-confirm"]').text()).toContain('odd-lane')
+    expect(w.get('[data-testid="release-confirm"]').text()).toContain('did not finish')
+    expect(w.get('[data-testid="confirm-ok"]').text()).toBe('Release anyway')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', true)
+  })
 })
