@@ -111,6 +111,7 @@ var _ GitHub = (*Client)(nil)
 
 type cachedBody struct {
 	etag string
+	link string // Link header of the original 200; a 304 may omit it
 	body []byte
 }
 
@@ -188,7 +189,11 @@ func (c *Client) do(ctx context.Context, method, target string, body any, cache 
 		e, ok := c.cache[full]
 		c.mu.Unlock()
 		if ok {
-			return resp.Header, e.body, nil
+			h := resp.Header.Clone()
+			if e.link != "" {
+				h.Set("Link", e.link)
+			}
+			return h, e.body, nil
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -204,7 +209,7 @@ func (c *Client) do(ctx context.Context, method, target string, body any, cache 
 			if c.cache == nil {
 				c.cache = map[string]cachedBody{}
 			}
-			c.cache[full] = cachedBody{etag: et, body: data}
+			c.cache[full] = cachedBody{etag: et, link: resp.Header.Get("Link"), body: data}
 			c.mu.Unlock()
 		}
 	}
