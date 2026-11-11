@@ -11,6 +11,11 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Release tab for cutting PPG releases through GitHub. Off unless
+  `RELEASE_GITHUB_TOKEN` is set; see the README.
+
 ## [0.1.2] - 2026-11-10
 
 ### Fixed

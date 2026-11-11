@@ -86,6 +86,33 @@ Removing someone ends their sessions immediately.
 Without `GOOGLE_CLIENT_ID` the dashboard runs read-only: there is no Sign in
 button and action endpoints return 401.
 
+## Release tab
+
+The Release tab cuts PPG releases from the dashboard. A signed-in user selects
+release units, approves the generated changelogs, watches the pre-release sync
+and QA, and approves the final release. Each step is an action on the
+`percona/obs-packaging` GitHub repository; the dashboard holds no release state
+of its own. The design is in
+[docs/superpowers/specs/2026-11-11-release-tab-design.md](docs/superpowers/specs/2026-11-11-release-tab-design.md).
+
+To enable it:
+
+- `RELEASE_GITHUB_TOKEN` (or `release.github_token`): a classic personal access
+  token with the `repo` and `workflow` scopes. All GitHub actions appear as the
+  token's owner.
+- `RELEASE_GITHUB_REPO` (or `release.github_repo`): the repository to act on.
+  Default `percona/obs-packaging`.
+
+Without a token the feature is off: the tab is hidden and the release API
+returns 404.
+
+The tab requires the obs-packaging changes listed in section 6 of the design
+(cut workflow, sync gate, Jenkins annotation, run names, unit list file,
+deletion report). It does not work against a repository that lacks them.
+
+Who performed each step is recorded only in the dashboard's own audit log. It
+is never written to GitHub, because the repository is public.
+
 ## Development
 
 ```sh
