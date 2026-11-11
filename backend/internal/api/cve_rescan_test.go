@@ -37,7 +37,7 @@ func rescanRouter(t *testing.T, f *fakeRescanner) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	obsClient := obs.SingleFleet(obs.NewClient(stubOBSServer(t).URL, "user", "pass"), "isv:percona")
-	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, f), sid
+	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, f, nil), sid
 }
 
 func TestCveRescanRequiresSignIn(t *testing.T) {
