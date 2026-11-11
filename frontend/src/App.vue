@@ -42,7 +42,7 @@ watch(signedIn, (on) => (on ? startUpgradeNotices() : stopUpgradeNotices()), { i
 watch(signedIn, (on) => {
   if (!on) { release.enabled.value = false; return }
   // Once the status is known, a disabled feature cannot be shown via the URL.
-  void release.loadStatus().then(() => { if (!release.enabled.value && mainTab.value === 'release') mainTab.value = 'overview' })
+  void release.loadStatus().then((done) => { if (done && !release.enabled.value && mainTab.value === 'release') mainTab.value = 'overview' })
 }, { immediate: true })
 release.start(computed(() => mainTab.value === 'release' && signedIn.value))
 

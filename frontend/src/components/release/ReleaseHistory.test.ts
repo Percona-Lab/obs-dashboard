@@ -46,4 +46,36 @@ describe('ReleaseHistory', () => {
     await w.findAll('[data-testid="history-toggle"]')[0].trigger('click')
     expect(w.find('[data-testid="history-notes"]').text()).toContain('y')
   })
+
+  it('shows an error with Retry when the first page fails', async () => {
+    let ok = false
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(ok ? json({ rows: [hr(1)] }) : new Response('x', { status: 500 }))))
+    const w = mount(ReleaseHistory)
+    await flushPromises()
+    expect(w.get('[data-testid="history-error"]').text()).toContain('Could not load the release history.')
+    expect(w.text()).not.toContain('No finished releases yet.')
+    ok = true
+    await w.get('[data-testid="history-retry"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="history-error"]').exists()).toBe(false)
+    expect(w.findAll('[data-testid="history-row"]')).toHaveLength(1)
+  })
+
+  it('keeps Load more with an inline error when a later page fails', async () => {
+    let fail = true
+    const page1 = Array.from({ length: 20 }, (_, i) => hr(i))
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(
+      url.endsWith('page=1') ? json({ rows: page1 }) : fail ? new Response('x', { status: 500 }) : json({ rows: [hr(99)] }))))
+    const w = mount(ReleaseHistory)
+    await flushPromises()
+    await w.get('[data-testid="history-more"]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-testid="history-row"]')).toHaveLength(20)
+    expect(w.find('[data-testid="history-more-error"]').exists()).toBe(true)
+    fail = false
+    await w.get('[data-testid="history-more"]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-testid="history-row"]')).toHaveLength(21)
+    expect(w.find('[data-testid="history-more-error"]').exists()).toBe(false)
+  })
 })

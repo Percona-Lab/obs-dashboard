@@ -50,6 +50,33 @@ describe('useRelease', () => {
     expect(enabled.value).toBe(false)
   })
 
+  it('loadStatus keeps enabled on network error or 5xx and reports completion', async () => {
+    const { enabled, loadStatus } = useRelease()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ enabled: true }))))
+    expect(await loadStatus()).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('net'))))
+    expect(await loadStatus()).toBe(false)
+    expect(enabled.value).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('x', { status: 503 }))))
+    expect(await loadStatus()).toBe(false)
+    expect(enabled.value).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ enabled: false }))))
+    expect(await loadStatus()).toBe(true)
+    expect(enabled.value).toBe(false)
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ enabled: true }))))
+    await loadStatus()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('no', { status: 404 }))))
+    expect(await loadStatus()).toBe(true)
+    expect(enabled.value).toBe(false)
+  })
+
+  it('loadHistory returns null on failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('x', { status: 500 }))))
+    expect(await useRelease().loadHistory(1)).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('net'))))
+    expect(await useRelease().loadHistory(1)).toBeNull()
+  })
+
   it('act refreshes and reports 409', async () => {
     const f = vi.fn((_url: string, init?: RequestInit) =>
       Promise.resolve(init?.method === 'POST' ? new Response('conflict', { status: 409 }) : json(snap)))

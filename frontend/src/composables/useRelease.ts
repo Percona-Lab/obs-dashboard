@@ -20,13 +20,18 @@ let stopWatch: WatchStopHandle | undefined
 let removeVisibility: (() => void) | undefined
 let refreshing: Promise<void> | null = null
 
-async function loadStatus(): Promise<void> {
+// Resolves true when the status call completed (a 200, 401 or 404). A network
+// error or 5xx leaves `enabled` unchanged and resolves false.
+async function loadStatus(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/status`)
-    if (res.status === 401) handleUnauthorized()
-    enabled.value = res.ok && ((await res.json()) as { enabled?: boolean }).enabled === true
+    if (res.status === 401) { handleUnauthorized(); enabled.value = false; return true }
+    if (res.status === 404) { enabled.value = false; return true }
+    if (!res.ok) return false
+    enabled.value = ((await res.json()) as { enabled?: boolean }).enabled === true
+    return true
   } catch {
-    enabled.value = false
+    return false
   }
 }
 
@@ -114,15 +119,15 @@ async function act(id: string, action: ReleaseAction, head: string, confirmFaile
   return (await send('POST', `/releases/${encodeURIComponent(id)}/${action}`, { head, confirm_failed: confirmFailed })) !== null
 }
 
-async function loadHistory(page: number): Promise<HistoryRow[]> {
+// null on any failure, so callers can tell an error from an empty page.
+async function loadHistory(page: number): Promise<HistoryRow[] | null> {
   try {
     const res = await fetch(`${BASE}/history?page=${page}`)
-    if (res.status === 401) { handleUnauthorized(); return [] }
-    if (!res.ok) { notice.value = await errorText(res); return [] }
+    if (res.status === 401) { handleUnauthorized(); return null }
+    if (!res.ok) return null
     return ((await res.json()) as { rows: HistoryRow[] }).rows
   } catch {
-    notice.value = 'Network error'
-    return []
+    return null
   }
 }
 
