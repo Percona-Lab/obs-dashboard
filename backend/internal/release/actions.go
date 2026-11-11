@@ -146,6 +146,9 @@ func (s *Service) guardAny(ctx context.Context, id string, allowed func(Release)
 		if r.pending {
 			return Release{}, fmt.Errorf("%w: a cut was just started for this release, wait for it", ErrConflict)
 		}
+		if !allowed(r) && cutHeld(r) {
+			return Release{}, fmt.Errorf("%w: the cut of this release is waiting for approval on GitHub", ErrConflict)
+		}
 		if !allowed(r) {
 			return Release{}, fmt.Errorf("%w: this release is at step %q, which does not allow that action", ErrConflict, r.Step)
 		}
@@ -170,6 +173,10 @@ func (s *Service) guard(ctx context.Context, id, head string, allowed func(Relea
 func cutIdle(r Release) bool {
 	return r.Cut == nil || (r.Cut.State != StateQueued && r.Cut.State != StateRunning)
 }
+
+// cutHeld reports whether the cut of r waits for approval on GitHub. The
+// release is then at the cutting step, which no action but Abandon accepts.
+func cutHeld(r Release) bool { return r.Cut != nil && r.Cut.State == StateApproval }
 
 // atChangelog reports whether the changelog may be edited and approved. After
 // a failed re-cut the PR still shows the release as it was before: it stays
@@ -452,8 +459,9 @@ func (s *Service) Recut(ctx context.Context, email, id, head string) error {
 		case StepChangelog, StepSync, StepQA:
 			return true
 		case StepCutting:
-			// A cut that is queued or running is not ours to repeat.
-			return r.Cut != nil && cutIdle(r)
+			// A cut that is queued or running is not ours to repeat, and one
+			// that waits for approval is a dispatch already.
+			return r.Cut != nil && cutIdle(r) && !cutHeld(r)
 		}
 		return false
 	})
@@ -589,6 +597,10 @@ func (s *Service) Abandon(ctx context.Context, email, id, head string) error {
 		if r.PR == 0 && r.HeadSHA == "" && r.Cut != nil && r.Cut.State == StateFailure {
 			// A first cut that failed left no branch and no PR: there is
 			// nothing to give up, and the row leaves the list by itself.
+			return false
+		}
+		if cutHeld(r) && r.PR == 0 && r.HeadSHA == "" {
+			// The same for a first cut that waits for approval.
 			return false
 		}
 		switch r.Step {

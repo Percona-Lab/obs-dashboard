@@ -14,7 +14,8 @@ const (
 	StepDone      Step = "done"
 )
 
-// RunState is "queued" | "running" | "success" | "failure".
+// RunState is "queued" | "running" | "success" | "failure". The cut of a
+// release (Release.Cut) can also be "approval".
 type RunState string
 
 const (
@@ -22,6 +23,10 @@ const (
 	StateRunning RunState = "running"
 	StateSuccess RunState = "success"
 	StateFailure RunState = "failure"
+
+	// StateApproval is a cut run GitHub holds until a person with write
+	// access approves it on the run page. It is not a failure.
+	StateApproval RunState = "approval"
 )
 
 type RunRef struct {
@@ -110,4 +115,5 @@ type Release struct {
 	finalRunDone bool     // the release run has completed
 	pending      bool     // a cut was dispatched and GitHub does not list its run yet
 	pendingUnits []string // units of a pending first cut
+	heldUnits    []string // units of a cut that waits for approval, when GitHub shows none
 }

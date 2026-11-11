@@ -19,11 +19,13 @@ const stepIndex = computed(() => ({ cutting: 1, changelog: 1, sync: 2, qa: 3, re
 const handMade = computed(() => props.release.id.startsWith('pr-'))
 const canAct = computed(() => props.release.dashboard)
 const cutRunning = computed(() => props.release.cut?.state === 'queued' || props.release.cut?.state === 'running')
+// GitHub holds the cut run until a person approves it there: nothing to retry, a dispatch is already waiting.
+const cutHeld = computed(() => props.release.step === 'cutting' && props.release.cut?.state === 'approval')
 // A failed first cut is shown at step cutting; a failed re-cut leaves the PR as it was, at step changelog.
 const cutFailed = computed(() => (props.release.step === 'cutting' || props.release.step === 'changelog') && props.release.cut?.state === 'failure')
 // A first cut that failed left no branch and no PR: there is nothing to abandon.
 const nothingToAbandon = computed(() => !props.release.pr && !props.release.head_sha && props.release.cut?.state === 'failure')
-const showAbandon = computed(() => canAct.value && props.release.step !== 'releasing' && !(props.release.step === 'cutting' && cutRunning.value) && !nothingToAbandon.value)
+const showAbandon = computed(() => canAct.value && props.release.step !== 'releasing' && !(props.release.step === 'cutting' && cutRunning.value) && !nothingToAbandon.value && !(cutHeld.value && !props.release.pr))
 const showRecut = computed(() => canAct.value && !handMade.value && (props.release.step === 'sync' || props.release.step === 'qa'))
 const showRetry = computed(() => canAct.value && !handMade.value && cutFailed.value)
 const readOnly = computed(() => ['sync', 'qa', 'releasing'].includes(props.release.step))
@@ -122,7 +124,12 @@ const progress = computed<Line[]>(() => {
         :class="i < stepIndex ? 'border-ok text-ok' : i === stepIndex ? 'border-brand-purple text-text-primary' : 'border-border text-text-muted'">{{ i + 1 }} · {{ s }}</li>
     </ol>
 
-    <div v-if="release.step === 'cutting'" data-testid="cut-progress" class="rounded-[10px] border border-border p-4">
+    <div v-if="cutHeld" data-testid="cut-approval" class="flex flex-col gap-2 rounded-[10px] border border-warn bg-warn-tint px-3 py-2 text-text-primary">
+      <span>Waiting for approval on GitHub. A person with write access must approve the workflow run before the cut starts.</span>
+      <a v-if="release.cut?.url && safeHref(release.cut.url)" :href="safeHref(release.cut.url)" target="_blank" rel="noopener noreferrer" class="self-start text-brand-purple">Open the run on GitHub</a>
+    </div>
+
+    <div v-else-if="release.step === 'cutting'" data-testid="cut-progress" class="rounded-[10px] border border-border p-4">
       <div v-for="l in progress" :key="l.text" class="flex items-center gap-[10px] py-1">
         <span class="w-4 text-center" :class="l.cls">{{ l.icon }}</span><span>{{ l.text }}</span>
       </div>

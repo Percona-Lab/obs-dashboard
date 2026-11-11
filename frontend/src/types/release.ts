@@ -2,6 +2,8 @@
 // The backend never lists a release at step 'done': finished releases leave the snapshot.
 export type ReleaseStep = 'cutting' | 'changelog' | 'sync' | 'qa' | 'releasing'
 export type RunState = 'queued' | 'running' | 'success' | 'failure'
+// The cut can also be held by GitHub until a person approves the workflow run. It is not a failure.
+export type CutState = RunState | 'approval'
 
 export interface BlockedReason {
   reason: 'in_flight' | 'not_built' | 'unchanged'
@@ -60,7 +62,7 @@ export interface ReleaseState {
   step: ReleaseStep
   dashboard: boolean
   units: UnitState[]
-  cut: { state: RunState; url: string } | null
+  cut: { state: CutState; url: string } | null
   sync_state: string
   sync_url: string // the run the sync state was read from; '' while none
   sync: InstanceCard[]

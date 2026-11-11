@@ -67,7 +67,7 @@ function openRelease(id: string) {
 }
 
 function stepLabel(r: ReleaseState): string {
-  if (r.step === 'cutting') return r.cut?.state === 'failure' ? 'Cut failed' : 'Cutting…'
+  if (r.step === 'cutting') return r.cut?.state === 'failure' ? 'Cut failed' : r.cut?.state === 'approval' ? 'Waiting for approval' : 'Cutting…'
   return STEP_LABEL[r.step]
 }
 const when = (iso: string | null) => {

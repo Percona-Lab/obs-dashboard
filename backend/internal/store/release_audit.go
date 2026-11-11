@@ -91,6 +91,41 @@ func ReleaseAuditByPR(db *sql.DB, prs []int, action string) (map[int]ReleaseAudi
 	return out, rows.Err()
 }
 
+// ReleaseAuditSince returns the rows recorded with one of actions at or after
+// since, oldest first, whatever their branch.
+func ReleaseAuditSince(db *sql.DB, actions []string, since time.Time) ([]ReleaseAudit, error) {
+	out := []ReleaseAudit{}
+	if len(actions) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(actions)+1)
+	for _, a := range actions {
+		args = append(args, a)
+	}
+	// Stored times compare as text only to the second (the fraction has no
+	// fixed width): ask from one second earlier, then compare the times.
+	args = append(args, since.UTC().Truncate(time.Second).Add(-time.Second).Format(time.RFC3339Nano))
+	rows, err := db.Query(`
+		SELECT at, email, action, branch, pr, detail
+		FROM release_audit
+		WHERE action IN (`+placeholders(len(actions))+`) AND at >= ?
+		ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanReleaseAudit(rows)
+		if err != nil {
+			return nil, err
+		}
+		if !a.At.Before(since) {
+			out = append(out, a)
+		}
+	}
+	return out, rows.Err()
+}
+
 func scanReleaseAudit(rows *sql.Rows) (ReleaseAudit, error) {
 	var a ReleaseAudit
 	var at string

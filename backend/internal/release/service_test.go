@@ -1144,9 +1144,263 @@ func TestReleaseJSONFields(t *testing.T) {
 	if lanes, ok := qa["lanes"].([]any); !ok || len(lanes) != 0 {
 		t.Errorf("qa.lanes = %#v, want an empty list", qa["lanes"])
 	}
-	for _, k := range []string{"pending", "pendingUnits", "syncRunDone", "finalRunDone"} {
+	for _, k := range []string{"pending", "pendingUnits", "heldUnits", "syncRunDone", "finalRunDone"} {
 		if _, ok := m[k]; ok {
 			t.Errorf("internal field %q is sent to the browser", k)
 		}
+	}
+}
+
+const heldURL = "https://github.com/run/7"
+
+// withHeldRun adds a cut run GitHub holds for approval, created at the
+// fixture's current time: no jobs and no branch in its name.
+func (fx *svcFixture) withHeldRun() {
+	fx.gh.mu.Lock()
+	defer fx.gh.mu.Unlock()
+	fx.gh.runs = append(fx.gh.runs, Run{
+		ID: 7, Name: "OBS Release Cut", WorkflowFile: WorkflowCut, Status: "completed", Conclusion: "action_required",
+		HTMLURL: heldURL, CreatedAt: fx.clock.now(),
+	})
+}
+
+// heldAfter records a cut or recut of the release branch now and adds the
+// held run five seconds later; the clock ends ten seconds after the dispatch.
+func (fx *svcFixture) heldAfter(t *testing.T, action, units string) {
+	t.Helper()
+	fx.recordCut(t, action, units)
+	fx.clock.advance(5 * time.Second)
+	fx.withHeldRun()
+	fx.clock.advance(5 * time.Second)
+}
+
+func TestSnapshotHeldFirstCut(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBuiltUnits()
+	fx.heldAfter(t, "cut", "ppg:staging:18")
+	rel := fx.oneRelease(t)
+	if rel.ID != relID || rel.Branch != testBranch || rel.Step != StepCutting || rel.PR != 0 || len(rel.Units) != 0 ||
+		rel.Cut == nil || rel.Cut.State != StateApproval || rel.Cut.URL != heldURL {
+		t.Fatalf("release = %+v cut = %+v", rel, rel.Cut)
+	}
+	if rel.StartedBy != "earlier@percona.com" {
+		t.Errorf("StartedBy = %q", rel.StartedBy)
+	}
+	b, err := json.Marshal(rel)
+	if err != nil || !strings.Contains(string(b), `"cut":{"state":"approval","url":"`+heldURL+`"}`) {
+		t.Errorf("json = %s err = %v", b, err)
+	}
+	rows, err := fx.svc.Units(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := rows[0].Blocked; rows[0].Tickable || b == nil || b.Reason != "in_flight" || b.ReleaseID != relID ||
+		b.Text != "Release "+relID+" is waiting for approval on GitHub." {
+		t.Errorf("held unit = %+v blocked = %+v", rows[0], b)
+	}
+	if !rows[1].Tickable || rows[1].Blocked != nil {
+		t.Errorf("other unit = %+v blocked = %+v", rows[1], rows[1].Blocked)
+	}
+	ctx := context.Background()
+	if _, err := fx.svc.Cut(ctx, actor, []string{"ppg:staging:18"}); !errors.Is(err, ErrConflict) {
+		t.Errorf("cut of a held unit: err = %v", err)
+	}
+	// No branch and no PR: there is nothing to give up, and nothing to repeat.
+	if err := fx.svc.Abandon(ctx, actor, relID, ""); !errors.Is(err, ErrConflict) {
+		t.Errorf("abandon: err = %v", err)
+	}
+	if err := fx.svc.Recut(ctx, actor, relID, ""); !errors.Is(err, ErrConflict) {
+		t.Errorf("recut: err = %v", err)
+	}
+	for _, m := range []string{"Dispatch", "DeleteBranch", "ClosePull", "CreatePull"} {
+		if c := fx.gh.callsOf(m); len(c) != 0 {
+			t.Errorf("unexpected GitHub write: %v", c)
+		}
+	}
+}
+
+func TestSnapshotHeldRecut(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog(LabelSync)
+	fx.heldAfter(t, "recut", "ppg:staging:18")
+	ctx := context.Background()
+	rel := fx.oneRelease(t)
+	if rel.Step != StepCutting || rel.PR != testPR || rel.Cut == nil || rel.Cut.State != StateApproval || rel.Cut.URL != heldURL {
+		t.Fatalf("step=%q pr=%d cut=%+v", rel.Step, rel.PR, rel.Cut)
+	}
+	_, saveErr := fx.svc.SaveChangelog(ctx, actor, relID, testHead, testUnit, editedSection)
+	_, resetErr := fx.svc.ResetChangelog(ctx, actor, relID, testHead, testUnit)
+	for name, err := range map[string]error{
+		"save":       saveErr,
+		"reset":      resetErr,
+		"approve":    fx.svc.ApproveChangelog(ctx, actor, relID, testHead),
+		"retry sync": fx.svc.RetrySync(ctx, actor, relID, testHead),
+		"approve qa": fx.svc.ApproveQA(ctx, actor, relID, testHead),
+		"release":    fx.svc.Release(ctx, actor, relID, testHead, true),
+		"recut":      fx.svc.Recut(ctx, actor, relID, testHead),
+	} {
+		if !errors.Is(err, ErrConflict) {
+			t.Errorf("%s while the cut waits for approval: err = %v", name, err)
+		}
+	}
+	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Dispatch", "MergePull", "ClosePull", "DeleteBranch"} {
+		if c := fx.gh.callsOf(m); len(c) != 0 {
+			t.Errorf("unexpected GitHub write: %v", c)
+		}
+	}
+	if err := fx.svc.Abandon(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if c := fx.gh.callsOf("DeleteBranch"); len(c) != 1 || c[0] != "DeleteBranch "+testBranch {
+		t.Errorf("DeleteBranch = %v", c)
+	}
+}
+
+// A held run does not open the PR of a branch that has none yet.
+func TestSnapshotHeldRecutWithoutPR(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.heldAfter(t, "recut", "ppg:staging:18")
+	rel := fx.oneRelease(t)
+	if rel.Step != StepCutting || rel.PR != 0 || rel.Cut == nil || rel.Cut.State != StateApproval {
+		t.Fatalf("step=%q pr=%d cut=%+v", rel.Step, rel.PR, rel.Cut)
+	}
+	if n := len(fx.gh.callsOf("CreatePull")); n != 0 {
+		t.Errorf("CreatePull called %d times", n)
+	}
+	// The branch exists: it can be given up.
+	if err := fx.svc.Abandon(context.Background(), actor, relID, testHead); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+}
+
+func TestSnapshotHeldRunWithoutAuditRowIgnored(t *testing.T) {
+	// No row at all.
+	fx := newFixture(t)
+	fx.withHeldRun()
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v, want none", snap.Releases)
+	}
+
+	// A row too long before the run, and one too long after it.
+	for _, d := range []time.Duration{181 * time.Second, -31 * time.Second} {
+		fx = newFixture(t)
+		fx.atChangelog()
+		fx.recordCut(t, "recut", "ppg:staging:18")
+		fx.clock.advance(d)
+		fx.withHeldRun()
+		fx.clock.advance(-d + 10*time.Minute)
+		if rel := fx.oneRelease(t); rel.Step != StepChangelog || rel.Cut == nil || rel.Cut.State != StateSuccess {
+			t.Fatalf("%v: step=%q cut=%+v", d, rel.Step, rel.Cut)
+		}
+	}
+
+	// A row that is not a cut.
+	fx = newFixture(t)
+	fx.atChangelog()
+	fx.recordCut(t, "save_changelog", testUnit)
+	fx.withHeldRun()
+	if rel := fx.oneRelease(t); rel.Step != StepChangelog {
+		t.Fatalf("step = %q", rel.Step)
+	}
+}
+
+// The run is matched to the closest dispatch, not to the first in the window.
+func TestSnapshotHeldRunClosestAuditRow(t *testing.T) {
+	fx := newFixture(t)
+	other := "release/20261111T150000"
+	err := store.AddReleaseAudit(fx.db, store.ReleaseAudit{At: fx.clock.now(), Email: actor, Action: "cut", Branch: other, Detail: "ppg:staging:17:extras"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.clock.advance(60 * time.Second)
+	fx.heldAfter(t, "cut", "ppg:staging:18")
+	if rel := fx.oneRelease(t); rel.Branch != testBranch || rel.Cut == nil || rel.Cut.State != StateApproval {
+		t.Fatalf("release = %+v", rel)
+	}
+}
+
+func TestSnapshotHeldRunApprovedLater(t *testing.T) {
+	fx := newFixture(t)
+	fx.heldAfter(t, "cut", "ppg:staging:18")
+	if rel := fx.oneRelease(t); rel.Cut == nil || rel.Cut.State != StateApproval {
+		t.Fatalf("held: cut = %+v", rel.Cut)
+	}
+	// Someone approves it on GitHub: the same run starts and gets its name.
+	fx.gh.mu.Lock()
+	fx.gh.runs[0].Name, fx.gh.runs[0].Status, fx.gh.runs[0].Conclusion = CutRunName(testBranch), "in_progress", ""
+	fx.gh.mu.Unlock()
+	fx.svc.Invalidate()
+	rel := fx.oneRelease(t)
+	if rel.ID != relID || rel.Step != StepCutting || rel.Cut == nil || rel.Cut.State != StateRunning || rel.Cut.URL != heldURL {
+		t.Fatalf("approved: step=%q cut=%+v", rel.Step, rel.Cut)
+	}
+}
+
+// A named run newer than the held one speaks for the branch.
+func TestSnapshotHeldRunSupersededByNamedRun(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog()
+	fx.heldAfter(t, "recut", "ppg:staging:18")
+	fx.gh.runs = append(fx.gh.runs, Run{ID: 8, Name: CutRunName(testBranch), WorkflowFile: WorkflowCut,
+		Status: "completed", Conclusion: "success", HTMLURL: "https://github.com/run/8", CreatedAt: fx.clock.now()})
+	if rel := fx.oneRelease(t); rel.Step != StepChangelog || rel.Cut == nil || rel.Cut.URL != "https://github.com/run/8" {
+		t.Fatalf("step=%q cut=%+v", rel.Step, rel.Cut)
+	}
+}
+
+// The held run wins over the marker of the dispatch that created it.
+func TestSnapshotHeldRunWinsOverPendingMarker(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog()
+	ctx := context.Background()
+	if err := fx.svc.Recut(ctx, actor, relID, testHead); err != nil {
+		t.Fatal(err)
+	}
+	if rel := fx.oneRelease(t); rel.Cut == nil || rel.Cut.State != StateQueued {
+		t.Fatalf("pending: cut = %+v", rel.Cut)
+	}
+	fx.clock.advance(5 * time.Second)
+	fx.withHeldRun()
+	fx.svc.Invalidate()
+	rel := fx.oneRelease(t)
+	if rel.Step != StepCutting || rel.Cut == nil || rel.Cut.State != StateApproval || rel.Cut.URL != heldURL {
+		t.Fatalf("held: step=%q cut=%+v", rel.Step, rel.Cut)
+	}
+	// Not "wait for the cut": the release can be given up.
+	if err := fx.svc.Abandon(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+}
+
+func TestSnapshotHeldFirstCutExpires(t *testing.T) {
+	fx := newFixture(t)
+	fx.heldAfter(t, "cut", "ppg:staging:18")
+	fx.clock.advance(23 * time.Hour)
+	if rel := fx.oneRelease(t); rel.Cut == nil || rel.Cut.State != StateApproval {
+		t.Fatalf("at 23h: cut = %+v", rel.Cut)
+	}
+	fx.clock.advance(2 * time.Hour)
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("at 25h: releases = %+v, want none", snap.Releases)
+	}
+	rows, err := fx.svc.Units(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := rows[0].Blocked; b != nil && b.Reason == "in_flight" {
+		t.Errorf("unit still in flight: %+v", b)
+	}
+}
+
+// A held re-cut older than a day is ignored: the release shows as it is.
+func TestSnapshotHeldRecutExpires(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog()
+	fx.heldAfter(t, "recut", "ppg:staging:18")
+	fx.clock.advance(25 * time.Hour)
+	if rel := fx.oneRelease(t); rel.Step != StepChangelog || rel.Cut == nil || rel.Cut.State != StateSuccess {
+		t.Fatalf("step=%q cut=%+v", rel.Step, rel.Cut)
 	}
 }

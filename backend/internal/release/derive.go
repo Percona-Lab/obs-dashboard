@@ -7,7 +7,7 @@ import (
 // Facts are the GitHub observations the derivation functions work from.
 type Facts struct {
 	Pull        *Pull // nil while no PR exists
-	CutRun      *Run  // newest run named exactly CutRunName(branch)
+	CutRun      *Run  // newest run named exactly CutRunName(branch), held runs left out
 	HeadRuns    []Run // runs for Pull.HeadSHA
 	Jobs        map[int64][]Job
 	Annotations map[int64][]Annotation
@@ -27,6 +27,12 @@ func RunStateOf(status, conclusion string) RunState {
 		return StateRunning
 	}
 	return StateQueued
+}
+
+// needsApproval reports whether GitHub ended a run at once, with no jobs,
+// because a person has to approve it first.
+func needsApproval(r Run) bool {
+	return r.Status == "completed" && r.Conclusion == "action_required"
 }
 
 func jobState(j Job) RunState { return RunStateOf(j.Status, j.Conclusion) }
@@ -84,14 +90,15 @@ func DeriveStep(f Facts) Step {
 }
 
 // headRuns returns the PR-workflow runs for the current head,
-// newest first.
+// newest first. A run that waits for approval (what a re-cut's push leaves on
+// the new head) never ran: it is left out, as if there were no run yet.
 func headRuns(f Facts) []Run {
 	if f.Pull == nil || f.Pull.HeadSHA == "" {
 		return nil
 	}
 	var out []Run
 	for _, r := range f.HeadRuns {
-		if r.WorkflowFile == WorkflowPR && r.HeadSHA == f.Pull.HeadSHA {
+		if r.WorkflowFile == WorkflowPR && r.HeadSHA == f.Pull.HeadSHA && !needsApproval(r) {
 			out = append(out, r)
 		}
 	}
