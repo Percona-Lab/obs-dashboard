@@ -75,6 +75,8 @@ type GHRelease struct {
 type GitHub interface {
 	OpenPulls(ctx context.Context) ([]Pull, error)
 	MergedPulls(ctx context.Context, since time.Time) ([]Pull, error)
+	// HasClosedPull reports whether a closed pull request has branch as its head.
+	HasClosedPull(ctx context.Context, branch string) (bool, error)
 	PullFiles(ctx context.Context, number int) ([]string, error)
 	CreatePull(ctx context.Context, head, title, body string) (Pull, error)
 	ClosePull(ctx context.Context, number int) error
@@ -382,6 +384,20 @@ func (c *Client) MergedPulls(ctx context.Context, since time.Time) ([]Pull, erro
 			return true
 		})
 	return out, err
+}
+
+func (c *Client) HasClosedPull(ctx context.Context, branch string) (bool, error) {
+	owner, _, _ := strings.Cut(c.Repo, "/")
+	q := url.Values{"state": {"closed"}, "head": {owner + ":" + branch}, "per_page": {"1"}}
+	_, data, err := c.do(ctx, http.MethodGet, c.repoPath("pulls?"+q.Encode()), nil, false)
+	if err != nil {
+		return false, err
+	}
+	ps, err := decodeArray[ghPull](data)
+	if err != nil {
+		return false, errors.New("github GET pulls: decode failed")
+	}
+	return len(ps) > 0, nil
 }
 
 func (c *Client) PullFiles(ctx context.Context, number int) ([]string, error) {

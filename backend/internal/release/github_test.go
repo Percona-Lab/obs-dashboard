@@ -436,3 +436,23 @@ func TestGitHubForeignNextLinkRefused(t *testing.T) {
 		t.Fatal("request sent to foreign host")
 	}
 }
+
+func TestGitHubHasClosedPull(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{{`[{"number":9,"state":"closed"}]`, true}, {`[]`, false}} {
+		c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			if r.URL.Path != "/repos/percona/obs-packaging/pulls" || q.Get("state") != "closed" ||
+				q.Get("head") != "percona:release/b" || q.Get("per_page") != "1" {
+				t.Errorf("request %s?%s", r.URL.Path, r.URL.RawQuery)
+			}
+			fmt.Fprint(w, tc.body)
+		}))
+		got, err := c.HasClosedPull(context.Background(), "release/b")
+		if err != nil || got != tc.want {
+			t.Errorf("body %s: got %v, %v; want %v", tc.body, got, err, tc.want)
+		}
+	}
+}

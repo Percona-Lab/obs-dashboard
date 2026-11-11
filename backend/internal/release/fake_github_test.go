@@ -30,12 +30,14 @@ type fakeGitHub struct {
 	releases    []GHRelease
 	tagSHAs     map[string]string
 	commitPulls map[string]Pull // sha -> PR (Number, HTMLURL)
+	closedHeads map[string]bool // branches that have a closed pull request
 
-	calls  []string
-	err    error
-	nextPR int
-	block  chan struct{} // when non-nil, Branches waits for it to close
-	now    func() time.Time
+	calls        []string
+	err          error
+	hasClosedErr error // returned by HasClosedPull only
+	nextPR       int
+	block        chan struct{} // when non-nil, Branches waits for it to close
+	now          func() time.Time
 }
 
 var _ GitHub = (*fakeGitHub)(nil)
@@ -49,6 +51,7 @@ func newFakeGitHub() *fakeGitHub {
 		artifacts:   map[string][]byte{},
 		tagSHAs:     map[string]string{},
 		commitPulls: map[string]Pull{},
+		closedHeads: map[string]bool{},
 		nextPR:      500,
 		now:         time.Now,
 	}
@@ -144,6 +147,18 @@ func (f *fakeGitHub) MergedPulls(ctx context.Context, since time.Time) ([]Pull, 
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeGitHub) HasClosedPull(ctx context.Context, branch string) (bool, error) {
+	err := f.record("HasClosedPull", branch)
+	defer f.mu.Unlock()
+	if err == nil {
+		err = f.hasClosedErr
+	}
+	if err != nil {
+		return false, err
+	}
+	return f.closedHeads[branch], nil
 }
 
 func (f *fakeGitHub) PullFiles(ctx context.Context, number int) ([]string, error) {
