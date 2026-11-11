@@ -87,6 +87,11 @@ type Service struct {
 	atGen    uint64       // gen the last refresh started under
 	inflight *refreshCall // the refresh running now, if any
 
+	// actMu serialises the wizard actions; the fields below it are guarded by it.
+	actMu      sync.Mutex
+	lastCutAt  time.Time
+	recentCuts map[string]time.Time // unit -> when its cut was dispatched
+
 	mainMu  sync.Mutex
 	main    []mainUnit
 	mainAt  time.Time

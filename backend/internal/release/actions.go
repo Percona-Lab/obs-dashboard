@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/percona/obs-dashboard/internal/store"
 )
@@ -31,6 +32,10 @@ const (
 	auditRetryRelease     = "retry_release"
 	auditAbandon          = "abandon"
 )
+
+// recentCutTTL is how long a dispatched cut counts as in flight before GitHub
+// is expected to show it.
+const recentCutTTL = 2 * time.Minute
 
 // guardAny reads GitHub afresh and returns the release with id when it is a
 // dashboard release (not a fork PR) for which allowed holds. The email of the
@@ -105,10 +110,19 @@ func (s *Service) recordRow(email, action, branch string, pr int, detail string)
 // Cut starts a release of units (unit roots, as listed by Units). Each must
 // be tickable now. It returns the id of the new release.
 func (s *Service) Cut(ctx context.Context, email string, units []string) (string, error) {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	if len(units) == 0 {
 		return "", fmt.Errorf("%w: choose at least one unit", ErrBadRequest)
 	}
 	s.Invalidate()
+	snap, err := s.Snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	if snap.Stale {
+		return "", errStale
+	}
 	rows, err := s.Units(ctx)
 	if err != nil {
 		return "", err
@@ -132,12 +146,33 @@ func (s *Service) Cut(ctx context.Context, email string, units []string) (string
 			}
 			return "", fmt.Errorf("%w: unit %s: %s", ErrConflict, u, why)
 		}
+		if at, ok := s.recentCuts[u]; ok && s.now().Sub(at) < recentCutTTL {
+			return "", fmt.Errorf("%w: unit %s was cut a moment ago", ErrConflict, u)
+		}
 		seen[u] = true
 	}
-	branch := BranchPrefix + s.now().UTC().Format("20060102T150405")
+	// Branch names are second-granular: never reuse the previous one.
+	ts := s.now().UTC().Truncate(time.Second)
+	if !ts.After(s.lastCutAt) {
+		ts = s.lastCutAt.Add(time.Second)
+	}
+	branch := BranchPrefix + ts.Format("20060102T150405")
 	joined := strings.Join(units, " ")
 	if err := s.gh.Dispatch(ctx, WorkflowCut, map[string]string{"units": joined, "branch": branch}); err != nil {
 		return "", err
+	}
+	s.lastCutAt = ts
+	if s.recentCuts == nil {
+		s.recentCuts = map[string]time.Time{}
+	}
+	now := s.now()
+	for u, at := range s.recentCuts {
+		if now.Sub(at) >= recentCutTTL {
+			delete(s.recentCuts, u)
+		}
+	}
+	for _, u := range units {
+		s.recentCuts[u] = now
 	}
 	s.recordRow(email, auditCut, branch, 0, joined)
 	s.Invalidate()
@@ -147,6 +182,8 @@ func (s *Service) Cut(ctx context.Context, email string, units []string) (string
 // SaveChangelog replaces unit's changelog section with section by amending
 // the release commit. It returns the new head.
 func (s *Service) SaveChangelog(ctx context.Context, email, id, head, unit, section string) (string, error) {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, atChangelog)
 	if err != nil {
 		return "", err
@@ -162,6 +199,8 @@ func (s *Service) SaveChangelog(ctx context.Context, email, id, head, unit, sect
 
 // ResetChangelog puts back the changelog section the cut generated for unit.
 func (s *Service) ResetChangelog(ctx context.Context, email, id, head, unit string) (string, error) {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, atChangelog)
 	if err != nil {
 		return "", err
@@ -217,6 +256,8 @@ func (s *Service) writeSection(ctx context.Context, r Release, unit string, pick
 // ApproveChangelog starts the sync: the obs-sync label is what the PR
 // workflow waits for.
 func (s *Service) ApproveChangelog(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, atChangelog)
 	if err != nil {
 		return err
@@ -232,6 +273,8 @@ func (s *Service) ApproveChangelog(ctx context.Context, email, id, head string) 
 // RetrySync runs a failed sync again by taking the obs-sync label off and
 // putting it back.
 func (s *Service) RetrySync(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
 		return r.Step == StepSync && r.PR != 0 && r.SyncState == string(StateFailure)
 	})
@@ -251,6 +294,8 @@ func (s *Service) RetrySync(ctx context.Context, email, id, head string) error {
 
 // ApproveQA starts the QA lanes.
 func (s *Service) ApproveQA(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
 		return r.Step == StepQA && r.PR != 0 && r.QA != nil && r.QA.State == "waiting"
 	})
@@ -269,6 +314,8 @@ func (s *Service) ApproveQA(ctx context.Context, email, id, head string) error {
 // both labels come off and the cut is dispatched anew. It also retries a cut
 // that failed.
 func (s *Service) Recut(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
 		if !ownsBranch(r) {
 			return false
@@ -336,6 +383,8 @@ func (s *Service) unitsOf(r Release) ([]string, error) {
 // Release merges the release PR; the release workflow then publishes it. A
 // failed QA lane needs confirmFailed.
 func (s *Service) Release(ctx context.Context, email, id, head string, confirmFailed bool) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
 		return r.Step == StepQA && r.PR != 0 && r.QA != nil && r.QA.State == "finished"
 	})
@@ -367,6 +416,8 @@ func (s *Service) Release(ctx context.Context, email, id, head string, confirmFa
 // RetryRelease runs a failed release workflow again. The PR is merged, so
 // there is no head to compare.
 func (s *Service) RetryRelease(ctx context.Context, email, id string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guardAny(ctx, id, func(r Release) bool {
 		return r.Step == StepReleasing && r.PR != 0 && r.Final != nil && r.Final.State == StateFailure
 	})
@@ -393,7 +444,13 @@ func (s *Service) RetryRelease(ctx context.Context, email, id string) error {
 // GitHub close the PR) and the PR is closed explicitly too. A PR made by hand
 // is only closed; its branch is not ours.
 func (s *Service) Abandon(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
+		if !cutIdle(r) {
+			// The running cut would create the branch again.
+			return false
+		}
 		switch r.Step {
 		case StepCutting, StepChangelog, StepSync, StepQA:
 			return true
