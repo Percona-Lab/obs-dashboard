@@ -161,7 +161,7 @@ describe('ReleaseWizard', () => {
   })
 
   it('offers Retry final sync when the final sync failed', async () => {
-    const inst = { instance: 'obs-a', state: 'failure' as const, url: '', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [] }
+    const inst = { instance: 'obs-a', state: 'failure' as const, url: '', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [], skipped_units: [], nothing_to_sync: false }
     const w = mountW({ step: 'releasing', final: { tags: ['t1'], instances: [inst], github_releases: 'skipped', cleanup: 'queued', state: 'failure', url: '' } })
     expect(w.text()).toContain('PR #5 merged')
     expect(w.text()).toContain('Publish the GitHub releases')

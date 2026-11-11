@@ -1664,3 +1664,59 @@ func TestSnapshotCutUnitsEmptyOtherwise(t *testing.T) {
 		t.Errorf("CutUnits = %v, want none once units are resolved", rel.CutUnits)
 	}
 }
+
+// An instance that holds none of a unit's projects reports outcome "skipped"
+// for it: that is not a failure, and a card with nothing but skipped entries
+// had nothing to sync.
+func TestSnapshotPopulateSkippedOutcome(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withPR(LabelSync)
+	fx.withPRRun("completed", "success",
+		populateJob(100, "obs", "completed", "success"),
+		populateJob(101, "labs", "completed", "success"),
+		populateJob(102, "mixed", "completed", "success"),
+	)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"obs"] = []byte(
+		`[{"project":"ppg:releases:16:tde","outcome":"success","removals":[]}]`)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"labs"] = []byte(
+		`[{"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"mixed"] = []byte(
+		`[{"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]},
+		  {"project":"ppg:releases:18","outcome":"success","removals":[]}]`)
+
+	rel := fx.oneRelease(t)
+	if rel.SyncState != string(StateSuccess) || len(rel.Sync) != 3 {
+		t.Fatalf("SyncState=%q Sync=%+v", rel.SyncState, rel.Sync)
+	}
+	obs, labs, mixed := rel.Sync[0], rel.Sync[1], rel.Sync[2]
+	if obs.NothingToSync || len(obs.SkippedUnits) != 0 || obs.SkippedUnits == nil {
+		t.Errorf("obs card = %+v", obs)
+	}
+	if !labs.NothingToSync || !reflect.DeepEqual(labs.SkippedUnits, []string{"ppg:releases:16:tde"}) ||
+		len(labs.FailedUnits) != 0 || labs.State != StateSuccess {
+		t.Errorf("labs card = %+v", labs)
+	}
+	if mixed.NothingToSync || !reflect.DeepEqual(mixed.SkippedUnits, []string{"ppg:releases:16:tde"}) || len(mixed.FailedUnits) != 0 {
+		t.Errorf("mixed card = %+v", mixed)
+	}
+	b, err := json.Marshal(labs)
+	if err != nil || !strings.Contains(string(b), `"skipped_units":["ppg:releases:16:tde"]`) || !strings.Contains(string(b), `"nothing_to_sync":true`) {
+		t.Errorf("json = %s err = %v", b, err)
+	}
+}
+
+// A skipped entry next to a failed one is not listed as failed.
+func TestSnapshotPopulateSkippedIsNotFailed(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withPR(LabelSync)
+	fx.withPRRun("completed", "failure", populateJob(100, "obs", "completed", "failure"))
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"obs"] = []byte(
+		`[{"project":"ppg:releases:18","outcome":"failure","removals":[]},
+		  {"project":"ppg:releases:16:tde","outcome":"skipped","removals":[]}]`)
+	card := fx.oneRelease(t).Sync[0]
+	if !reflect.DeepEqual(card.FailedUnits, []string{"ppg:releases:18"}) || card.NothingToSync {
+		t.Errorf("card = %+v", card)
+	}
+}
