@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	defaultTTL     = 15 * time.Second
-	mergedWindow   = 7 * 24 * time.Hour
-	historyPerPage = 20
-	runListLimit   = 100
-	refreshTimeout = time.Minute
-	mainRef        = "main"
+	defaultTTL      = 15 * time.Second
+	mergedWindow    = 7 * 24 * time.Hour
+	failedCutWindow = 24 * time.Hour
+	historyPerPage  = 20
+	runListLimit    = 100
+	refreshTimeout  = time.Minute
+	mainRef         = "main"
 
 	auditCut     = "cut"
 	auditRelease = "release"
@@ -310,13 +311,31 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 	for _, b := range branches {
 		if !claimed[b.Name] {
 			claimed[b.Name] = true
+			// A branch whose PR was closed without merging is not a release,
+			// and gets no new PR.
+			closed, err := s.gh.HasClosedPull(ctx, b.Name)
+			if err != nil {
+				return nil, err
+			}
+			if closed {
+				continue
+			}
 			cands = append(cands, candidate{id: strings.TrimPrefix(b.Name, BranchPrefix), branch: b.Name, branchSHA: b.SHA})
 		}
 	}
-	// A first cut that has not created its branch yet.
+	// A first cut that has not created its branch yet, or that failed before
+	// pushing one (the workflow pushes nothing then); a failure is listed for
+	// a day.
 	cutPrefix := CutRunName(BranchPrefix)
-	for _, r := range cutRuns {
-		if r.Status == "completed" || !strings.HasPrefix(r.Name, cutPrefix) {
+	for i := range cutRuns {
+		r := cutRuns[i]
+		if !strings.HasPrefix(r.Name, cutPrefix) {
+			continue
+		}
+		if latest := FindRun(cutRuns, r.Name); latest == nil || latest.ID != r.ID {
+			continue
+		}
+		if r.Status == "completed" && (r.Conclusion == "success" || now.Sub(r.CreatedAt) >= failedCutWindow) {
 			continue
 		}
 		branch := strings.TrimPrefix(r.Name, CutRunName(""))
@@ -409,7 +428,7 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 	}
 
 	// The cut workflow does not open the PR; the dashboard does, once.
-	if c.pull == nil && c.branchSHA != "" && len(rel.Units) > 0 && rel.Cut != nil && rel.Cut.State == StateSuccess {
+	if c.pull == nil && c.branchSHA != "" && pullable(rel.Units) && rel.Cut != nil && rel.Cut.State == StateSuccess {
 		p, err := s.gh.CreatePull(ctx, c.branch, pullTitle(rel.Units), pullBody(rel.Units))
 		if err != nil {
 			// Not fatal: the release stays at the cutting step and the next
@@ -744,6 +763,24 @@ func pullBody(units []UnitState) string {
 	return strings.Join(sections, "\n\n") + "\n"
 }
 
+// pullable reports whether a PR can be opened for units: there is at least
+// one, and each has a release id and some changelog text.
+func pullable(units []UnitState) bool {
+	if len(units) == 0 {
+		return false
+	}
+	for _, u := range units {
+		text := u.Changelog
+		if u.Generated != nil {
+			text = *u.Generated
+		}
+		if u.ReleaseID == "" || strings.TrimSpace(text) == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // soft reports whether err means "not there or not usable" rather than a
 // failed GitHub call.
 func soft(err error) bool {
@@ -834,13 +871,42 @@ func (s *Service) Units(ctx context.Context) ([]UnitRow, error) {
 	}
 	defs := make([]UnitDef, 0, len(main))
 	last := map[string]string{}
+	cutting := false // a cut is running and its units are not known yet
+	for _, r := range snap.Releases {
+		if r.Step == StepCutting && len(r.Units) == 0 && r.Cut != nil &&
+			(r.Cut.State == StateQueued || r.Cut.State == StateRunning) {
+			cutting = true
+		}
+		// A unit whose identity could not be read still names its release
+		// project.
+		for _, u := range r.Units {
+			for _, m := range main {
+				if u.ReleaseProject != "" && u.ReleaseProject == m.def.ReleaseProject {
+					inFlight[m.def.Unit] = r.ID
+				}
+			}
+		}
+	}
 	for _, m := range main {
 		defs = append(defs, m.def)
 		if n := len(m.tags); n > 0 {
 			last[m.def.Unit] = ReleaseID(m.tags[n-1])
 		}
 	}
-	return BuildUnitRows(defs, s.pkgs, inFlight, last)
+	rows, err := BuildUnitRows(defs, s.pkgs, inFlight, last)
+	if err != nil {
+		return nil, err
+	}
+	if cutting {
+		// Fail closed: the cut has not said which units it takes.
+		for i := range rows {
+			rows[i].Tickable = false
+			if rows[i].Blocked == nil || rows[i].Blocked.Reason != "in_flight" {
+				rows[i].Blocked = &Blocked{Reason: "in_flight", Text: "A release is being cut. Try again in a minute."}
+			}
+		}
+	}
+	return rows, nil
 }
 
 // History returns one page (1-based, 20 GitHub releases per page) of

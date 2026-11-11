@@ -316,9 +316,10 @@ func TestSnapshotCutRunningBeforeBranchExists(t *testing.T) {
 		t.Fatalf("release = %+v", rel)
 	}
 
-	// A finished cut that left no branch is not a release.
+	// A finished cut that left no branch and is older than a day is not a release.
 	fx = newFixture(t)
 	fx.withCutRun("completed", "failure")
+	fx.gh.runs[0].CreatedAt = fx.clock.now().Add(-25 * time.Hour)
 	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
 		t.Fatalf("releases = %+v, want none", snap.Releases)
 	}
@@ -757,5 +758,127 @@ func TestHistoryGitHubError(t *testing.T) {
 	fx.gh.setErr(&APIError{Method: "GET", Path: "/repos/x/releases", Status: 500})
 	if _, err := fx.svc.History(context.Background(), 1); err == nil {
 		t.Fatal("err = nil")
+	}
+}
+
+func TestUnitsInFlightByReleaseProject(t *testing.T) {
+	fx := newFixture(t)
+	fx.gh.open = []Pull{{Number: testPR, HeadRef: testBranch, HeadSHA: testHead, HeadRepo: fakeRepo, BaseRepo: fakeRepo, State: "open"}}
+	fx.gh.pullFiles[testPR] = []string{testYAML} // release.yaml unreadable: the unit has only its release project
+	rel := fx.oneRelease(t)
+	if len(rel.Units) != 1 || rel.Units[0].Unit != "" || rel.Units[0].ReleaseProject != "ppg:releases:18" {
+		t.Fatalf("units = %+v", rel.Units)
+	}
+	rows, err := fx.svc.Units(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Tickable || rows[0].Blocked == nil || rows[0].Blocked.Reason != "in_flight" {
+		t.Errorf("row 0 = %+v blocked = %+v", rows[0], rows[0].Blocked)
+	}
+	if rows[1].Blocked != nil && rows[1].Blocked.Reason == "in_flight" {
+		t.Errorf("row 1 blocked = %+v", rows[1].Blocked)
+	}
+}
+
+func TestUnitsFailClosedWhileCutRunning(t *testing.T) {
+	for _, status := range []string{"queued", "in_progress"} {
+		fx := newFixture(t)
+		fx.withCutRun(status, "")
+		rows, err := fx.svc.Units(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("rows = %+v", rows)
+		}
+		for _, r := range rows {
+			if r.Tickable || r.Blocked == nil || r.Blocked.Reason != "in_flight" ||
+				r.Blocked.Text != "A release is being cut. Try again in a minute." {
+				t.Errorf("%s: row %s = %+v blocked = %+v", status, r.Unit, r, r.Blocked)
+			}
+		}
+	}
+}
+
+func TestUnitsNotBlockedByFailedCut(t *testing.T) {
+	fx := newFixture(t)
+	fx.withCutRun("completed", "failure")
+	src := fakeSource{"ppg:staging:18": {pkg("ppg:staging:18", "pg", "18.2", model.RollupPublished)}}
+	svc := NewService(Options{GitHub: fx.gh, DB: fx.db, Packages: src, Now: fx.clock.now})
+	rel, err := svc.Snapshot(context.Background())
+	if err != nil || len(rel.Releases) != 1 || rel.Releases[0].Cut == nil || rel.Releases[0].Cut.State != StateFailure {
+		t.Fatalf("snapshot = %+v err = %v", rel, err)
+	}
+	rows, err := svc.Units(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rows[0].Tickable || rows[0].Blocked != nil {
+		t.Errorf("row 0 = %+v blocked = %+v", rows[0], rows[0].Blocked)
+	}
+}
+
+func TestSnapshotNoPRWhenClosedPullExists(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.gh.closedHeads[testBranch] = true
+	snap := fx.snapshot(t)
+	if len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v, want none", snap.Releases)
+	}
+	if n := len(fx.gh.callsOf("CreatePull")); n != 0 {
+		t.Fatalf("CreatePull called %d times", n)
+	}
+}
+
+func TestSnapshotHasClosedPullErrorFailsRefresh(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.gh.hasClosedErr = errors.New("boom")
+	if _, err := fx.svc.Snapshot(context.Background()); err == nil {
+		t.Fatal("Snapshot succeeded, want an error")
+	}
+	if n := len(fx.gh.callsOf("CreatePull")); n != 0 {
+		t.Fatalf("CreatePull called %d times", n)
+	}
+}
+
+func TestSnapshotNoPRForDegradedUnits(t *testing.T) {
+	// release.yaml of the branch is unreadable: the unit has no release id.
+	fx := newFixture(t)
+	fx.gh.branches = []Ref{{Name: testBranch, SHA: testHead}}
+	fx.gh.setFile(testBranch, testYAML, "not: [valid")
+	fx.withCutRun("completed", "success")
+	rel := fx.oneRelease(t)
+	if n := len(fx.gh.callsOf("CreatePull")); n != 0 || rel.PR != 0 {
+		t.Fatalf("CreatePull calls = %d, PR = %d, units = %+v", n, rel.PR, rel.Units)
+	}
+
+	// A readable release.yaml with no changelog section and no generated text.
+	fx = newFixture(t)
+	fx.withBranch()
+	fx.gh.setFile(testBranch, testChangelogPath, "# Changelog\n")
+	fx.withCutRun("completed", "success")
+	fx.oneRelease(t)
+	if n := len(fx.gh.callsOf("CreatePull")); n != 0 {
+		t.Fatalf("empty changelog: CreatePull called %d times", n)
+	}
+}
+
+func TestSnapshotFailedCutListedFor24h(t *testing.T) {
+	fx := newFixture(t)
+	fx.withCutRun("completed", "failure")
+	fx.gh.runs[0].CreatedAt = fx.clock.now().Add(-23 * time.Hour)
+	rel := fx.oneRelease(t)
+	if rel.ID != "20261111T143210" || rel.Step != StepCutting || len(rel.Units) != 0 || !rel.Dashboard ||
+		rel.Cut == nil || rel.Cut.State != StateFailure || rel.Cut.URL != "https://github.com/run/1" {
+		t.Fatalf("release = %+v", rel)
+	}
+	fx.clock.advance(2 * time.Hour)
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("after 25h: releases = %+v, want none", snap.Releases)
 	}
 }
