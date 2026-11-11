@@ -103,8 +103,8 @@ To enable it:
 - `RELEASE_GITHUB_REPO` (or `release.github_repo`): the repository to act on.
   Default `percona/obs-packaging`.
 
-Without a token the feature is off: the tab is hidden and the release API
-returns 404.
+Without a token the feature is off: the tab is hidden, the status endpoint
+reports it as disabled and the other release routes return 404.
 
 The tab requires the obs-packaging changes listed in section 6 of the design
 (cut workflow, sync gate, Jenkins annotation, run names, unit list file,
