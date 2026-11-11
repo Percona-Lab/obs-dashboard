@@ -74,3 +74,41 @@ func TestReleaseAuditRoundTrip(t *testing.T) {
 		t.Fatalf("empty branch input: got %v, %v", emptyB, err)
 	}
 }
+
+func TestReleaseAuditSince(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	base := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	for _, a := range []ReleaseAudit{
+		{At: base.Add(-time.Nanosecond), Action: "cut", Branch: "release/old", Detail: "u0"},
+		{At: base, Action: "cut", Branch: "release/a", Detail: "u1 u2"},
+		{At: base.Add(500 * time.Millisecond), Action: "recut", Branch: "release/b", Detail: "u3"},
+		{At: base.Add(time.Minute), Action: "abandon", Branch: "release/a"},
+		{At: base.Add(time.Hour), Action: "recut", Branch: "release/a", Detail: "u1"},
+	} {
+		if err := AddReleaseAudit(db, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ReleaseAuditSince(db, []string{"cut", "recut"}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Branch != "release/a" || got[0].Detail != "u1 u2" ||
+		got[1].Branch != "release/b" || got[2].Action != "recut" || got[2].Branch != "release/a" {
+		t.Fatalf("rows = %+v", got)
+	}
+	// A bound inside a second: rows of that second before it are left out.
+	got, err = ReleaseAuditSince(db, []string{"cut", "recut"}, base.Add(250*time.Millisecond))
+	if err != nil || len(got) != 2 || got[0].Branch != "release/b" {
+		t.Fatalf("mid-second: rows = %+v err = %v", got, err)
+	}
+	none, err := ReleaseAuditSince(db, nil, base)
+	if err != nil || none == nil || len(none) != 0 {
+		t.Fatalf("no actions: got %v, %v", none, err)
+	}
+}

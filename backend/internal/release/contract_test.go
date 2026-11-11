@@ -31,3 +31,14 @@ func TestInstanceOf(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceOfUnexpandedMatrix(t *testing.T) {
+	for _, c := range [][2]string{
+		{"Populate pre-release (${{ matrix.instance.name }})", JobPopulatePrefix},
+		{"Wait for download CDN (${{ matrix.instance.name }})", JobCDNPrefix},
+	} {
+		if got, ok := InstanceOf(c[0], c[1]); ok || got != "" {
+			t.Errorf("InstanceOf(%q) = (%q, %v), want no instance", c[0], got, ok)
+		}
+	}
+}

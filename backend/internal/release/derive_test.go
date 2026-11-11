@@ -434,3 +434,64 @@ func TestQAFailsToStart(t *testing.T) {
 		t.Fatalf("lanes: %+v", q)
 	}
 }
+
+const unexpanded = "${{ matrix.instance.name }}"
+
+func TestSyncCardsIgnoresUnexpandedSkippedJobs(t *testing.T) {
+	f := syncFacts(pj(unexpanded, "completed", "skipped"), cj(unexpanded, "completed", "skipped"))
+	f.HeadRuns[0].Status, f.HeadRuns[0].Conclusion = "completed", "success"
+	st, cards, run := SyncCards(f)
+	if st != string(StateQueued) || len(cards) != 0 || run != nil {
+		t.Fatalf("skipped: state=%q cards=%+v run=%+v", st, cards, run)
+	}
+	if q := QARun(f); q != nil {
+		t.Fatalf("QA run = %+v, want none", q)
+	}
+
+	// Whatever its state, a job with an unexpanded name is no instance.
+	f = syncFacts(pj(unexpanded, "completed", "cancelled"), cj(unexpanded, "completed", "cancelled"))
+	if st, cards, run := SyncCards(f); st != string(StateQueued) || len(cards) != 0 || run != nil {
+		t.Fatalf("cancelled: state=%q cards=%+v run=%+v", st, cards, run)
+	}
+
+	// Next to a real instance the unexpanded jobs change nothing.
+	f = syncFacts(pj("isv", "completed", "success"), pj(unexpanded, "completed", "skipped"), cj(unexpanded, "completed", "skipped"))
+	if st, cards, _ := SyncCards(f); st != string(StateSuccess) || len(cards) != 1 || cards[0].Instance != "isv" {
+		t.Fatalf("with a real instance: state=%q cards=%+v", st, cards)
+	}
+
+	fin := FinalStatus(Facts{
+		ReleaseRun: &Run{Status: "in_progress"},
+		ReleaseJobs: []Job{
+			{Name: JobCopyPrefix + unexpanded + ")", Status: "completed", Conclusion: "cancelled"},
+			{Name: JobDeletePrefix + unexpanded + ")", Status: "completed", Conclusion: "cancelled"},
+		},
+	})
+	if len(fin.Instances) != 0 || fin.Cleanup != "" || fin.State != StateRunning {
+		t.Fatalf("final = %+v", fin)
+	}
+}
+
+func TestDeriveIgnoresActionRequiredRuns(t *testing.T) {
+	// What a re-cut's force-push leaves on the new head: a run with no jobs.
+	f := Facts{
+		Pull:     &Pull{HeadSHA: "h", Labels: []string{LabelSync}},
+		HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "completed", Conclusion: "action_required", HTMLURL: "run1"}},
+		Jobs:     map[int64][]Job{},
+	}
+	if st, cards, run := SyncCards(f); st != string(StateQueued) || len(cards) != 0 || run != nil {
+		t.Fatalf("sync: state=%q cards=%+v run=%+v, want queued", st, cards, run)
+	}
+	if got := DeriveStep(f); got != StepSync {
+		t.Fatalf("step = %s", got)
+	}
+
+	f = qaStartFacts("completed", "action_required")
+	q := QALanes(f, nil, true)
+	if q.State != "running" || q.Error != "" || q.URL != "" {
+		t.Fatalf("qa = %+v, want running with no run", q)
+	}
+	if st, _, run := SyncCards(f); st != string(StateSuccess) || run == nil || run.ID != 1 {
+		t.Fatalf("sync next to an action_required run = %q %+v", st, run)
+	}
+}

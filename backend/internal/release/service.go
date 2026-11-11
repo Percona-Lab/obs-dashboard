@@ -32,6 +32,14 @@ const (
 	auditRelease = "release"
 )
 
+// A cut run held for approval carries no branch in its name. It belongs to the
+// cut or recut recorded closest to its creation, no more than heldBefore
+// before or heldAfter after that record.
+const (
+	heldBefore = 30 * time.Second
+	heldAfter  = 180 * time.Second
+)
+
 // missingArtifactTTL is how long a finished run's missing artifact is not
 // asked for again.
 const missingArtifactTTL = 5 * time.Minute
@@ -490,6 +498,12 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Runs held for approval are not cut runs of a branch yet: from here on
+	// cutRuns is the runs that started.
+	cutRuns, held, err := s.heldCuts(cutRuns, now)
+	if err != nil {
+		return nil, err
+	}
 
 	branchSHA := map[string]string{}
 	for _, b := range branches {
@@ -584,8 +598,14 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 			cands = append(cands, candidate{id: strings.TrimPrefix(branch, BranchPrefix), branch: branch})
 		}
 	}
-	// A cut dispatched a moment ago whose run GitHub does not list yet.
-	for _, branch := range s.pendingBranches(cutRuns) {
+	// A cut dispatched a moment ago whose run GitHub does not list yet, and
+	// a first cut that waits for approval.
+	waiting := s.pendingBranches(cutRuns)
+	for branch := range held {
+		waiting = append(waiting, branch)
+	}
+	sort.Strings(waiting)
+	for _, branch := range waiting {
 		if !claimed[branch] {
 			claimed[branch] = true
 			cands = append(cands, candidate{id: strings.TrimPrefix(branch, BranchPrefix), branch: branch})
@@ -607,7 +627,11 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 
 	releases := make([]Release, 0, len(cands))
 	for _, c := range cands {
-		rel, err := s.build(ctx, c, cutRuns, releaseRuns, audit[c.branch])
+		var heldRun *Run
+		if r, ok := held[c.branch]; ok && !c.fork {
+			heldRun = &r
+		}
+		rel, err := s.build(ctx, c, cutRuns, releaseRuns, audit[c.branch], heldRun)
 		if err != nil {
 			return nil, err
 		}
@@ -620,6 +644,52 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 	sort.Slice(releases, func(i, j int) bool { return releases[i].ID < releases[j].ID })
 	s.pruneCaches()
 	return releases, nil
+}
+
+// heldCuts splits the cut runs into those that started and, by branch, the
+// newest one GitHub holds for approval. A held run older than failedCutWindow
+// or one no recorded cut or recut accounts for is dropped.
+func (s *Service) heldCuts(runs []Run, now time.Time) ([]Run, map[string]Run, error) {
+	started := make([]Run, 0, len(runs))
+	var waiting []Run
+	for _, r := range runs {
+		switch {
+		case !needsApproval(r):
+			started = append(started, r)
+		case now.Sub(r.CreatedAt) < failedCutWindow:
+			waiting = append(waiting, r)
+		}
+	}
+	held := map[string]Run{}
+	if len(waiting) == 0 || s.db == nil {
+		return started, held, nil
+	}
+	rows, err := store.ReleaseAuditSince(s.db, []string{auditCut, auditRecut}, now.Add(-failedCutWindow-heldAfter))
+	if err != nil {
+		return nil, nil, fmt.Errorf("release audit: %w", err)
+	}
+	for _, r := range waiting {
+		branch, best := "", time.Duration(0)
+		for _, a := range rows {
+			d := r.CreatedAt.Sub(a.At)
+			if d < -heldBefore || d > heldAfter {
+				continue
+			}
+			if d < 0 {
+				d = -d
+			}
+			if branch == "" || d < best {
+				branch, best = a.Branch, d
+			}
+		}
+		if branch == "" {
+			continue
+		}
+		if cur, ok := held[branch]; !ok || newer(r, cur) {
+			held[branch] = r
+		}
+	}
+	return started, held, nil
 }
 
 // releaseFiles returns the release.yaml files a PR changes. The answer for a
@@ -644,8 +714,9 @@ func (s *Service) releaseFiles(ctx context.Context, p Pull) ([]string, error) {
 	return paths, nil
 }
 
-// build reads the details of one release and derives its step.
-func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns []Run, audit []store.ReleaseAudit) (Release, error) {
+// build reads the details of one release and derives its step. held is the
+// cut run of the branch that waits for approval, if any.
+func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns []Run, audit []store.ReleaseAudit, held *Run) (Release, error) {
 	rel := Release{
 		ID: c.id, Branch: c.branch, HeadSHA: c.branchSHA, Dashboard: !c.fork,
 		Units: []UnitState{}, Sync: []InstanceCard{}, Removals: []Removal{}, Actions: []AuditEntry{},
@@ -658,6 +729,12 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 	}
 	if f.CutRun != nil {
 		rel.Cut = &RunRef{State: RunStateOf(f.CutRun.Status, f.CutRun.Conclusion), URL: f.CutRun.HTMLURL}
+	}
+	// A held run counts while no cut of the branch started after it, and
+	// until the PR is merged.
+	waiting := held != nil && (f.CutRun == nil || newer(*held, *f.CutRun)) && (c.pull == nil || c.pull.MergedAt == nil)
+	if waiting {
+		rel.Cut = &RunRef{State: StateApproval, URL: held.HTMLURL}
 	}
 
 	var err error
@@ -694,7 +771,14 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 		}
 	}
 	rel.Step = DeriveStep(f)
-	if !c.fork && c.branch != "" && (f.Pull == nil || f.Pull.MergedAt == nil) {
+	if waiting {
+		// Whatever the PR shows is from before the dispatch. The held run is
+		// what the pending marker waited for.
+		rel.Step = StepCutting
+		if len(rel.Units) == 0 {
+			rel.heldUnits = cutUnits(audit)
+		}
+	} else if !c.fork && c.branch != "" && (f.Pull == nil || f.Pull.MergedAt == nil) {
 		// GitHub still shows the state from before the dispatch: nothing may
 		// be decided on it.
 		if p, ok := s.pendingCutOf(c.branch, cutRuns); ok {
@@ -715,6 +799,17 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 	return rel, nil
 }
 
+// cutUnits returns the unit roots of the newest cut or recut among the audit
+// rows of a branch (oldest first) that recorded any.
+func cutUnits(audit []store.ReleaseAudit) []string {
+	for i := len(audit) - 1; i >= 0; i-- {
+		if a := audit[i]; (a.Action == auditCut || a.Action == auditRecut) && strings.TrimSpace(a.Detail) != "" {
+			return strings.Fields(a.Detail)
+		}
+	}
+	return nil
+}
+
 // readHead reads the PR-workflow runs of an open PR's head: sync cards with
 // their reports, and QA lanes.
 func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
@@ -726,7 +821,7 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 		}
 		f.HeadRuns = runs
 		for _, r := range runs {
-			if r.WorkflowFile != WorkflowPR || r.HeadSHA != p.HeadSHA {
+			if r.WorkflowFile != WorkflowPR || r.HeadSHA != p.HeadSHA || needsApproval(r) {
 				continue
 			}
 			if f.Jobs[r.ID], err = s.jobsOf(ctx, r); err != nil {
@@ -1120,6 +1215,7 @@ func (s *Service) Units(ctx context.Context) ([]UnitRow, error) {
 		return nil, err
 	}
 	inFlight := map[string]string{}
+	held := map[string]string{} // unit -> release whose cut waits for approval
 	for _, r := range snap.Releases {
 		for _, u := range r.Units {
 			if u.Unit != "" {
@@ -1130,6 +1226,12 @@ func (s *Service) Units(ctx context.Context) ([]UnitRow, error) {
 		// dispatch, GitHub does not show them yet.
 		for _, u := range r.pendingUnits {
 			inFlight[u] = r.ID
+		}
+		// A first cut that waits for approval: its units are known from the
+		// audit log only.
+		for _, u := range r.heldUnits {
+			inFlight[u] = r.ID
+			held[u] = r.ID
 		}
 	}
 	defs := make([]UnitDef, 0, len(main))
@@ -1159,6 +1261,11 @@ func (s *Service) Units(ctx context.Context) ([]UnitRow, error) {
 	rows, err := BuildUnitRows(defs, s.pkgs, inFlight, last)
 	if err != nil {
 		return nil, err
+	}
+	for i := range rows {
+		if b := rows[i].Blocked; b != nil && b.Reason == "in_flight" && b.ReleaseID != "" && b.ReleaseID == held[rows[i].Unit] {
+			b.Text = "Release " + b.ReleaseID + " is waiting for approval on GitHub."
+		}
 	}
 	if cutting {
 		// Fail closed: the cut has not said which units it takes.

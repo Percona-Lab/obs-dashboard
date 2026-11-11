@@ -36,13 +36,14 @@ func CutRunName(branch string) string { return "Cut " + branch }
 func ReleaseRunName(pr int) string { return "Release PR #" + strconv.Itoa(pr) }
 
 // InstanceOf returns the text between prefix and the closing ")" of a job
-// name, and whether name has that shape.
+// name, and whether name has that shape. A skipped matrix job keeps its
+// unexpanded name ("… (${{ matrix.instance.name }})"): that is no instance.
 func InstanceOf(name, prefix string) (string, bool) {
 	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ")") {
 		return "", false
 	}
 	inst := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ")")
-	if inst == "" {
+	if inst == "" || strings.Contains(inst, "${{") {
 		return "", false
 	}
 	return inst, true

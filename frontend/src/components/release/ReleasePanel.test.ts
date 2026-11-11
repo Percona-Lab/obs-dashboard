@@ -117,4 +117,15 @@ describe('ReleasePanel', () => {
     await w.get('[data-testid="open-builds"]').trigger('click')
     expect(w.emitted('open-builds')).toHaveLength(1)
   })
+
+  it('the in-flight list labels a held cut as waiting for approval', async () => {
+    useRelease().snapshot.value = snap([rel({ step: 'cutting', pr: 0, pr_url: '', units: [], cut: { state: 'approval', url: 'https://run' } })])
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    const li = w.get('[data-release="r1"]')
+    expect(li.text()).toContain('Waiting for approval')
+    expect(li.text()).not.toContain('Cutting')
+    expect(li.text()).not.toContain('Cut failed')
+    expect(li.find('.text-fail').exists()).toBe(false)
+  })
 })

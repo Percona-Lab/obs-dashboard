@@ -200,4 +200,25 @@ describe('ReleaseWizard', () => {
     expect(a.attributes('rel')).toBe('noopener noreferrer')
     expect(mountW({ sync_state: 'failure', sync_url: 'javascript:alert(1)' }).find('[data-testid="sync-failed"] a').exists()).toBe(false)
   })
+
+  it('a held cut shows waiting for approval with a run link and no Retry', () => {
+    const held = { state: 'approval' as const, url: 'https://github.com/o/r/actions/runs/9' }
+    const w = mountW({ step: 'cutting', pr: 0, pr_url: '', head_sha: '', units: [], cut: held })
+    const box = w.get('[data-testid="cut-approval"]')
+    expect(box.text()).toContain('Waiting for approval on GitHub. A person with write access must approve the workflow run before the cut starts.')
+    const a = box.get('a')
+    expect(a.text()).toBe('Open the run on GitHub')
+    expect(a.attributes('href')).toBe('https://github.com/o/r/actions/runs/9')
+    expect(a.attributes('rel')).toBe('noopener noreferrer')
+    expect(box.classes()).toContain('border-warn')
+    expect(w.find('[data-testid="cut-failed"]').exists()).toBe(false)
+    expect(w.find('[data-testid="retry-cut"]').exists()).toBe(false)
+    expect(w.find('[data-testid="recut"]').exists()).toBe(false)
+    expect(w.text()).not.toContain('The cut failed')
+    // no PR: nothing to abandon
+    expect(w.find('[data-testid="abandon"]').exists()).toBe(false)
+    // a held re-cut of a release that has a PR can be abandoned
+    expect(mountW({ step: 'cutting', cut: held }).find('[data-testid="abandon"]').exists()).toBe(true)
+    expect(mountW({ step: 'cutting', cut: { state: 'approval', url: 'javascript:alert(1)' } }).find('[data-testid="cut-approval"] a').exists()).toBe(false)
+  })
 })
