@@ -370,3 +370,69 @@ func TestGitHubFileDecodesContent(t *testing.T) {
 		t.Fatalf("%q %v", got, err)
 	}
 }
+
+// TestGitHubPaginationSurvives304 checks that a conditional request answered
+// with 304 and no Link header still follows the cached Link to page 2.
+func TestGitHubPaginationSurvives304(t *testing.T) {
+	var srvURL string
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		etag := `"p1"`
+		body := `{"jobs":[{"id":1,"name":"a","status":"completed","conclusion":"failure"}]}`
+		if page == "2" {
+			etag = `"p2"`
+			body = `{"jobs":[{"id":2,"name":"b","status":"completed","conclusion":"success"}]}`
+		}
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified) // deliberately no Link header
+			return
+		}
+		w.Header().Set("ETag", etag)
+		if page != "2" {
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?per_page=100&page=2>; rel="next"`, srvURL, r.URL.Path))
+		}
+		fmt.Fprint(w, body)
+	}))
+	srvURL = c.APIBase
+	first, err := c.Jobs(context.Background(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.Jobs(context.Background(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || fmt.Sprint(first) != fmt.Sprint(second) {
+		t.Fatalf("first %+v second %+v", first, second)
+	}
+}
+
+// TestGitHubForeignNextLinkRefused checks that a next link pointing at another
+// host is never requested. The code returns page 1's items and no error.
+func TestGitHubForeignNextLinkRefused(t *testing.T) {
+	var called bool
+	var mu sync.Mutex
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		called = true
+		mu.Unlock()
+		fmt.Fprint(w, `{"jobs":[]}`)
+	}))
+	defer foreign.Close()
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", fmt.Sprintf(`<%s/jobs?page=2>; rel="next"`, foreign.URL))
+		fmt.Fprint(w, `{"jobs":[{"id":1,"name":"a","status":"completed","conclusion":"failure"}]}`)
+	}))
+	jobs, err := c.Jobs(context.Background(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("jobs %+v", jobs)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if called {
+		t.Fatal("request sent to foreign host")
+	}
+}
