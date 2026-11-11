@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-11
+
 ### Added
 
 - Loading indicators on the Release tab while the releases, the release units
