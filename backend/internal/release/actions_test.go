@@ -670,3 +670,268 @@ func TestActionAbandonRefusedWhileCutRunning(t *testing.T) {
 		fx.wantNoWrites(t)
 	}
 }
+
+const relID = "20261111T143210"
+
+func TestActionChangelogLockedAfterFailedRecut(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "failure")
+	fx.withPR()
+	fx.gh.artifacts["1:"+ArtifactChangelogs] = []byte(`{"ppg:staging:18":"## [18.6-6] generated\n"}`)
+	ctx := context.Background()
+	if rel := fx.oneRelease(t); rel.Step != StepChangelog || rel.Cut == nil || rel.Cut.State != StateFailure {
+		t.Fatalf("release = %+v", rel)
+	}
+	_, err := fx.svc.SaveChangelog(ctx, actor, relID, testHead, testUnit, editedSection)
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("save: err = %v", err)
+	}
+	if _, err = fx.svc.ResetChangelog(ctx, actor, relID, testHead, testUnit); !errors.Is(err, ErrConflict) {
+		t.Errorf("reset: err = %v", err)
+	}
+	if err = fx.svc.ApproveChangelog(ctx, actor, relID, testHead); !errors.Is(err, ErrConflict) {
+		t.Errorf("approve: err = %v", err)
+	}
+	fx.wantNoWrites(t)
+	if err = fx.svc.Recut(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("recut after a failed cut: %v", err)
+	}
+}
+
+func TestActionRecutPendingUntilRunListed(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog()
+	ctx := context.Background()
+	if err := fx.svc.Recut(ctx, actor, relID, testHead); err != nil {
+		t.Fatal(err)
+	}
+	rel := fx.oneRelease(t)
+	if rel.Step != StepCutting || rel.Cut == nil || rel.Cut.State != StateQueued || rel.Cut.URL != "" {
+		t.Fatalf("after recut: step=%q cut=%+v", rel.Step, rel.Cut)
+	}
+	_, saveErr := fx.svc.SaveChangelog(ctx, actor, relID, testHead, testUnit, editedSection)
+	for name, err := range map[string]error{
+		"save":    saveErr,
+		"approve": fx.svc.ApproveChangelog(ctx, actor, relID, testHead),
+		"recut":   fx.svc.Recut(ctx, actor, relID, testHead),
+		"abandon": fx.svc.Abandon(ctx, actor, relID, testHead),
+	} {
+		if !errors.Is(err, ErrConflict) {
+			t.Errorf("%s while the dispatch is pending: err = %v", name, err)
+		}
+	}
+	if n := len(fx.gh.callsOf("Dispatch")); n != 1 {
+		t.Errorf("Dispatch called %d times, want 1", n)
+	}
+	if n := len(fx.gh.callsOf("AddLabel")) + len(fx.gh.callsOf("AmendFile")) + len(fx.gh.callsOf("DeleteBranch")); n != 0 {
+		t.Errorf("%d writes while pending", n)
+	}
+
+	// GitHub lists the new run: the marker goes and the run speaks for itself.
+	fx.clock.advance(5 * time.Second)
+	fx.gh.mu.Lock()
+	fx.gh.runs = append(fx.gh.runs, Run{ID: 2, Name: CutRunName(testBranch), WorkflowFile: WorkflowCut,
+		Status: "completed", Conclusion: "success", HTMLURL: "https://github.com/run/2", CreatedAt: fx.clock.now()})
+	fx.gh.mu.Unlock()
+	fx.svc.Invalidate()
+	rel = fx.oneRelease(t)
+	if rel.Step != StepChangelog || rel.Cut == nil || rel.Cut.URL != "https://github.com/run/2" {
+		t.Fatalf("after the run appeared: step=%q cut=%+v", rel.Step, rel.Cut)
+	}
+	if err := fx.svc.ApproveChangelog(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("approve after the cut: %v", err)
+	}
+}
+
+func TestActionPendingCutExpires(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog()
+	ctx := context.Background()
+	if err := fx.svc.Recut(ctx, actor, relID, testHead); err != nil {
+		t.Fatal(err)
+	}
+	fx.clock.advance(recentCutTTL - time.Second)
+	fx.svc.Invalidate()
+	if rel := fx.oneRelease(t); rel.Step != StepCutting {
+		t.Fatalf("just before expiry: step = %q", rel.Step)
+	}
+	fx.clock.advance(time.Second)
+	fx.svc.Invalidate()
+	if rel := fx.oneRelease(t); rel.Step != StepChangelog || rel.Cut == nil || rel.Cut.State != StateSuccess {
+		t.Fatalf("after expiry: step=%q cut=%+v", rel.Step, rel.Cut)
+	}
+	if err := fx.svc.ApproveChangelog(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("approve after expiry: %v", err)
+	}
+}
+
+func TestActionCutListedWhilePending(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBuiltUnits()
+	ctx := context.Background()
+	id, err := fx.svc.Cut(ctx, actor, []string{"ppg:staging:18"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := fx.oneRelease(t)
+	if rel.ID != id || rel.Step != StepCutting || rel.Cut == nil || rel.Cut.State != StateQueued || rel.Cut.URL != "" || len(rel.Units) != 0 {
+		t.Fatalf("release = %+v", rel)
+	}
+	if rel.StartedBy != actor {
+		t.Errorf("StartedBy = %q", rel.StartedBy)
+	}
+	rows, err := fx.svc.Units(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Tickable || rows[0].Blocked == nil || rows[0].Blocked.Reason != "in_flight" || rows[0].Blocked.ReleaseID != id {
+		t.Errorf("cut unit = %+v blocked = %+v", rows[0], rows[0].Blocked)
+	}
+	if !rows[1].Tickable {
+		t.Errorf("other unit = %+v blocked = %+v", rows[1], rows[1].Blocked)
+	}
+	if err := fx.svc.Abandon(ctx, actor, id, ""); !errors.Is(err, ErrConflict) {
+		t.Errorf("abandon while pending: err = %v", err)
+	}
+}
+
+// qaFailedToStart sets up a release whose QA run ended before any lane.
+func (fx *svcFixture) qaFailedToStart() {
+	fx.atChangelog(LabelSync, LabelQA)
+	fx.withPRRun("completed", "success", populateJob(100, "obs", "completed", "success"))
+	fx.gh.runs = append(fx.gh.runs, Run{
+		ID: 11, Name: "Release PR", WorkflowFile: WorkflowPR, HeadSHA: testHead, Status: "completed", Conclusion: "failure",
+		HTMLURL: "https://github.com/run/11", CreatedAt: fx.clock.now().Add(-10 * time.Minute),
+	})
+	fx.gh.jobs[11] = []Job{{ID: 300, Name: "Release / Detect QA matrix (obs)", Status: "completed", Conclusion: "failure"}}
+}
+
+func labelCalls(fx *svcFixture) []string {
+	var out []string
+	for _, c := range fx.gh.allCalls() {
+		if strings.HasPrefix(c, "RemoveLabel") || strings.HasPrefix(c, "AddLabel") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestActionRetryQA(t *testing.T) {
+	fx := newFixture(t)
+	fx.qaFailedToStart()
+	ctx := context.Background()
+	rel := fx.oneRelease(t)
+	if rel.Step != StepQA || rel.QA == nil || rel.QA.State != "failure" || rel.QA.Error != "QA could not start." || rel.QA.URL != "https://github.com/run/11" {
+		t.Fatalf("release: step=%q qa=%+v", rel.Step, rel.QA)
+	}
+	if err := fx.svc.Release(ctx, actor, relID, testHead, true); !errors.Is(err, ErrConflict) {
+		t.Fatalf("release with failed QA start: err = %v", err)
+	}
+	if err := fx.svc.RetryQA(ctx, actor, relID, testHead); err != nil {
+		t.Fatal(err)
+	}
+	if got := labelCalls(fx); len(got) != 2 || got[0] != "RemoveLabel 415 qa-release" || got[1] != "AddLabel 415 qa-release" {
+		t.Errorf("label calls = %v", got)
+	}
+	fx.wantOneAudit(t, "retry_qa")
+
+	// The same retry again within a minute is refused.
+	if err := fx.svc.RetryQA(ctx, actor, relID, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second retry: err = %v", err)
+	}
+	if n := len(labelCalls(fx)); n != 2 {
+		t.Errorf("label calls after the refused retry = %d", n)
+	}
+	fx.clock.advance(61 * time.Second)
+	if err := fx.svc.RetryQA(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("retry after a minute: %v", err)
+	}
+}
+
+func TestActionRetryQAOnlyWhenFailed(t *testing.T) {
+	fx := newFixture(t)
+	fx.atQA(true, "in_progress", Job{ID: 200, Name: JobLanePrefix + "packages / pg_tde", Status: "in_progress"})
+	if err := fx.svc.RetryQA(context.Background(), actor, relID, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	fx.wantNoWrites(t)
+}
+
+func TestActionRetrySyncCooldown(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog(LabelSync)
+	fx.withPRRun("completed", "failure", populateJob(100, "obs", "completed", "failure"))
+	ctx := context.Background()
+	if err := fx.svc.RetrySync(ctx, actor, relID, testHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.RetrySync(ctx, actor, relID, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second retry: err = %v", err)
+	}
+	if n := len(labelCalls(fx)); n != 2 {
+		t.Errorf("label calls = %d, want 2", n)
+	}
+	fx.clock.advance(61 * time.Second)
+	if err := fx.svc.RetrySync(ctx, actor, relID, testHead); err != nil {
+		t.Fatalf("retry after a minute: %v", err)
+	}
+}
+
+func TestActionRetryReleaseCooldown(t *testing.T) {
+	fx := newFixture(t)
+	fx.atReleasing("failure")
+	ctx := context.Background()
+	if err := fx.svc.RetryRelease(ctx, actor, relID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.RetryRelease(ctx, actor, relID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second retry: err = %v", err)
+	}
+	if n := len(fx.gh.callsOf("Dispatch")); n != 1 {
+		t.Errorf("Dispatch called %d times, want 1", n)
+	}
+}
+
+func TestActionRetrySyncWaitsForTheRun(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog(LabelSync)
+	fx.withPRRun("in_progress", "", populateJob(100, "obs", "completed", "failure"), populateJob(101, "labs", "in_progress", ""))
+	if rel := fx.oneRelease(t); rel.SyncState != string(StateFailure) {
+		t.Fatalf("SyncState = %q", rel.SyncState)
+	}
+	if err := fx.svc.RetrySync(context.Background(), actor, relID, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	fx.wantNoWrites(t)
+}
+
+func TestActionRetryReleaseWaitsForTheRun(t *testing.T) {
+	fx := newFixture(t)
+	fx.atReleasing("failure")
+	last := len(fx.gh.runs) - 1
+	fx.gh.runs[last].Status, fx.gh.runs[last].Conclusion = "in_progress", ""
+	fx.gh.jobs[20] = []Job{
+		{ID: 400, Name: JobCopyPrefix + "obs)", Status: "completed", Conclusion: "failure"},
+		{ID: 401, Name: JobCopyPrefix + "labs)", Status: "in_progress"},
+	}
+	if rel := fx.oneRelease(t); rel.Final == nil || rel.Final.State != StateFailure {
+		t.Fatalf("Final = %+v", rel.Final)
+	}
+	if err := fx.svc.RetryRelease(context.Background(), actor, relID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	fx.wantNoWrites(t)
+}
+
+func TestActionAbandonFailedFirstCutRefused(t *testing.T) {
+	fx := newFixture(t)
+	fx.withCutRun("completed", "failure")
+	if rel := fx.oneRelease(t); rel.PR != 0 || rel.HeadSHA != "" || rel.Cut == nil || rel.Cut.State != StateFailure {
+		t.Fatalf("release = %+v", rel)
+	}
+	if err := fx.svc.Abandon(context.Background(), actor, relID, ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	fx.wantNoWrites(t)
+}

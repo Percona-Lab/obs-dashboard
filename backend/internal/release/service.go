@@ -91,6 +91,7 @@ type Service struct {
 	actMu      sync.Mutex
 	lastCutAt  time.Time
 	recentCuts map[string]time.Time // unit -> when its cut was dispatched
+	lastRetry  map[string]time.Time // "<audit action> <release id>" -> when the retry was accepted
 
 	mainMu  sync.Mutex
 	main    []mainUnit
@@ -104,6 +105,10 @@ type Service struct {
 	generated map[int64]map[string]string // successful cut run -> unit -> section
 	reports   map[int64]jobReport         // finished populate job
 	tagPulls  map[string]tagPull          // tag -> PR of the tagged commit
+
+	// Cuts dispatched and not yet listed by GitHub, by branch. Also under
+	// cacheMu. Not release state: an entry lives two minutes at most.
+	pending map[string]pendingCut
 }
 
 type refreshCall struct {
@@ -349,6 +354,13 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 			cands = append(cands, candidate{id: strings.TrimPrefix(branch, BranchPrefix), branch: branch})
 		}
 	}
+	// A cut dispatched a moment ago whose run GitHub does not list yet.
+	for _, branch := range s.pendingBranches(cutRuns) {
+		if !claimed[branch] {
+			claimed[branch] = true
+			cands = append(cands, candidate{id: strings.TrimPrefix(branch, BranchPrefix), branch: branch})
+		}
+	}
 
 	audit := map[string][]store.ReleaseAudit{}
 	if s.db != nil {
@@ -456,6 +468,16 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 		}
 	}
 	rel.Step = DeriveStep(f)
+	if !c.fork && c.branch != "" && (f.Pull == nil || f.Pull.MergedAt == nil) {
+		// GitHub still shows the state from before the dispatch: nothing may
+		// be decided on it.
+		if p, ok := s.pendingCutOf(c.branch, cutRuns); ok {
+			rel.Step, rel.Cut, rel.pending = StepCutting, &RunRef{State: StateQueued}, true
+			if len(rel.Units) == 0 {
+				rel.pendingUnits = p.units
+			}
+		}
+	}
 
 	for _, a := range audit {
 		rel.Actions = append(rel.Actions, AuditEntry{At: a.At, Email: a.Email, Action: a.Action})
@@ -490,6 +512,7 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 	state, cards, syncRun := SyncCards(*f)
 	rel.SyncState, rel.Sync = state, cards
 	if syncRun != nil {
+		rel.SyncURL, rel.syncRunDone = syncRun.HTMLURL, syncRun.Status == "completed"
 		seen := map[Removal]bool{}
 		for _, j := range f.Jobs[syncRun.ID] {
 			inst, ok := InstanceOf(j.Name, JobPopulatePrefix)
@@ -514,7 +537,7 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 
 	qaLabel := hasLabel(p, LabelQA)
 	if qaLabel {
-		if run := findRunWith(*f, isLane); run != nil {
+		if run := QARun(*f); run != nil {
 			for _, j := range f.Jobs[run.ID] {
 				if !isLane(j) {
 					continue
@@ -543,6 +566,7 @@ func (s *Service) readFinal(ctx context.Context, f *Facts, rel *Release, release
 	}
 	f.ReleaseJobs = jobs
 	rel.Final = FinalStatus(*f)
+	rel.finalRunDone = f.ReleaseRun.Status == "completed"
 	for _, u := range rel.Units {
 		if u.Tag != "" {
 			rel.Final.Tags = append(rel.Final.Tags, u.Tag)
@@ -873,12 +897,17 @@ func (s *Service) Units(ctx context.Context) ([]UnitRow, error) {
 				inFlight[u.Unit] = r.ID
 			}
 		}
+		// A first cut dispatched a moment ago: its units are known from the
+		// dispatch, GitHub does not show them yet.
+		for _, u := range r.pendingUnits {
+			inFlight[u] = r.ID
+		}
 	}
 	defs := make([]UnitDef, 0, len(main))
 	last := map[string]string{}
 	cutting := false // a cut is running and its units are not known yet
 	for _, r := range snap.Releases {
-		if r.Step == StepCutting && len(r.Units) == 0 && r.Cut != nil &&
+		if r.Step == StepCutting && len(r.Units) == 0 && len(r.pendingUnits) == 0 && r.Cut != nil &&
 			(r.Cut.State == StateQueued || r.Cut.State == StateRunning) {
 			cutting = true
 		}

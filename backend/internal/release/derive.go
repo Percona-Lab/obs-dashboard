@@ -125,12 +125,59 @@ func isLane(j Job) bool {
 	return strings.HasPrefix(j.Name, JobLanePrefix) && !isSkipped(j)
 }
 
+func isCDN(j Job) bool {
+	_, ok := InstanceOf(j.Name, JobCDNPrefix)
+	return ok && !isSkipped(j)
+}
+
+func hasJob(jobs []Job, match func(Job) bool) bool {
+	for _, j := range jobs {
+		if match(j) {
+			return true
+		}
+	}
+	return false
+}
+
+// runFailed reports whether a run ended without doing its work. A run GitHub
+// skipped altogether did not fail.
+func runFailed(r Run) bool {
+	if r.Status != "completed" {
+		return false
+	}
+	switch r.Conclusion {
+	case "success", "skipped", "neutral":
+		return false
+	}
+	return true
+}
+
+// Texts of QA.Error.
+const (
+	qaErrCDN   = "The download servers did not serve the pre-release in time."
+	qaErrStart = "QA could not start."
+)
+
 // SyncCards derives the sync state and per-instance cards from the newest
-// run for the head that has at least one non-skipped populate job.
+// run for the head that has at least one non-skipped populate job. Without
+// such a run the sync is queued, unless the newest run that is not a QA-only
+// run (one with lane or CDN jobs) ended in failure: the workflow then failed
+// before any populate job, and that run is returned with no cards.
 func SyncCards(f Facts) (string, []InstanceCard, *Run) {
 	run := findRunWith(f, isPopulate)
 	cards := []InstanceCard{}
 	if run == nil {
+		runs := headRuns(f)
+		for i := range runs {
+			jobs := f.Jobs[runs[i].ID]
+			if hasJob(jobs, isLane) || hasJob(jobs, isCDN) {
+				continue
+			}
+			if runFailed(runs[i]) {
+				return string(StateFailure), cards, &runs[i]
+			}
+			break
+		}
 		return string(StateQueued), cards, nil
 	}
 	idx := map[string]int{}
@@ -156,6 +203,8 @@ func SyncCards(f Facts) (string, []InstanceCard, *Run) {
 			allOK = false
 		}
 	}
+	// Only the CDN jobs of the sync run itself count here; those of the run
+	// the qa-release label starts belong to QA.
 	for _, j := range jobs {
 		inst, ok := InstanceOf(j.Name, JobCDNPrefix)
 		if !ok {
@@ -186,22 +235,47 @@ func SyncCards(f Facts) (string, []InstanceCard, *Run) {
 	return string(StateRunning), cards, run
 }
 
-// QALanes derives the QA lanes from the newest run for the head that has at
-// least one lane job.
+// QARun returns the run QA is read from: the newest run for the head that has
+// lane or CDN jobs, else the newest run created after the sync run (the run
+// the qa-release label started, before it has such jobs or when it never got
+// that far). nil when there is none.
+func QARun(f Facts) *Run {
+	runs := headRuns(f)
+	for i := range runs {
+		jobs := f.Jobs[runs[i].ID]
+		if hasJob(jobs, isLane) || hasJob(jobs, isCDN) {
+			return &runs[i]
+		}
+	}
+	_, _, sync := SyncCards(f)
+	if sync == nil || len(runs) == 0 {
+		return nil
+	}
+	if runs[0].ID != sync.ID && newer(runs[0], *sync) {
+		return &runs[0]
+	}
+	return nil
+}
+
+// QALanes derives the QA state and lanes from QARun. The state is "failure"
+// when a CDN wait job failed, or when the run ended in failure without a
+// single lane.
 func QALanes(f Facts, units []UnitState, hasQALabel bool) QA {
 	qa := QA{State: "waiting", Lanes: []Lane{}}
 	if !hasQALabel {
 		return qa
 	}
 	qa.State = "running"
-	run := findRunWith(f, isLane)
+	run := QARun(f)
 	if run == nil {
 		return qa
 	}
-	if run.Status == "completed" {
-		qa.State = "finished"
-	}
+	qa.URL = run.HTMLURL
+	cdnFailed := false
 	for _, j := range f.Jobs[run.ID] {
+		if isCDN(j) && jobState(j) == StateFailure {
+			cdnFailed = true
+		}
 		if !isLane(j) {
 			continue
 		}
@@ -219,6 +293,14 @@ func QALanes(f Facts, units []UnitState, hasQALabel bool) QA {
 			break
 		}
 		qa.Lanes = append(qa.Lanes, l)
+	}
+	switch {
+	case cdnFailed:
+		qa.State, qa.Error = "failure", qaErrCDN
+	case len(qa.Lanes) == 0 && runFailed(*run):
+		qa.State, qa.Error = "failure", qaErrStart
+	case len(qa.Lanes) > 0 && run.Status == "completed":
+		qa.State = "finished"
 	}
 	return qa
 }

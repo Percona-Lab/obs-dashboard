@@ -327,3 +327,110 @@ func TestQALaneAnnotationTrimmed(t *testing.T) {
 		t.Fatalf("%+v", l)
 	}
 }
+
+func TestSyncFailsBeforeAnyPopulateJob(t *testing.T) {
+	mk := func(status, concl string) Facts {
+		return Facts{
+			Pull:     &Pull{HeadSHA: "h", Labels: []string{LabelSync}},
+			HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: status, Conclusion: concl, HTMLURL: "run1"}},
+			Jobs:     map[int64][]Job{1: {{Name: "Resolve the release", Status: status, Conclusion: concl}}},
+		}
+	}
+	st, cards, run := SyncCards(mk("completed", "failure"))
+	if st != string(StateFailure) || len(cards) != 0 || run == nil || run.HTMLURL != "run1" {
+		t.Fatalf("failed run: state=%q cards=%v run=%+v", st, cards, run)
+	}
+	if got := DeriveStep(mk("completed", "failure")); got != StepSync {
+		t.Fatalf("step = %s", got)
+	}
+	for _, c := range [][2]string{{"in_progress", ""}, {"queued", ""}, {"completed", "success"}, {"completed", "skipped"}} {
+		if st, _, run := SyncCards(mk(c[0], c[1])); st != string(StateQueued) || run != nil {
+			t.Errorf("%v: state=%q run=%+v, want queued", c, st, run)
+		}
+	}
+}
+
+func TestSyncFailureIgnoresQAOnlyRun(t *testing.T) {
+	f := Facts{
+		Pull: &Pull{HeadSHA: "h", Labels: []string{LabelSync}},
+		HeadRuns: []Run{
+			{ID: 2, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "completed", Conclusion: "failure", CreatedAt: mustTime().Add(time.Hour)},
+			{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "in_progress", CreatedAt: mustTime()},
+		},
+		Jobs: map[int64][]Job{
+			2: {cj("isv", "completed", "failure")},
+			1: {{Name: "Resolve the release", Status: "in_progress"}},
+		},
+	}
+	if st, _, _ := SyncCards(f); st != string(StateQueued) {
+		t.Fatalf("state = %q, want queued: the failed run is a QA-only run", st)
+	}
+}
+
+// qaStartFacts is a finished sync run (1) followed by the run the qa-release
+// label started (2), with the given state and jobs.
+func qaStartFacts(status, concl string, jobs ...Job) Facts {
+	return Facts{
+		Pull: &Pull{HeadSHA: "h", Labels: []string{LabelSync, LabelQA}},
+		HeadRuns: []Run{
+			{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "completed", Conclusion: "success", HTMLURL: "run1", CreatedAt: mustTime()},
+			{ID: 2, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: status, Conclusion: concl, HTMLURL: "run2", CreatedAt: mustTime().Add(time.Hour)},
+		},
+		Jobs: map[int64][]Job{
+			1: {pj("isv", "completed", "success")},
+			2: jobs,
+		},
+	}
+}
+
+func TestQAFailsToStart(t *testing.T) {
+	// Matrix detection failed: no CDN job, no lane.
+	f := qaStartFacts("completed", "failure", Job{Name: "Release / Detect QA matrix (isv)", Status: "completed", Conclusion: "failure"})
+	q := QALanes(f, nil, true)
+	if q.State != "failure" || q.Error != "QA could not start." || q.URL != "run2" || len(q.Lanes) != 0 {
+		t.Fatalf("no lanes: %+v", q)
+	}
+	if st, _, run := SyncCards(f); st != string(StateSuccess) || run == nil || run.ID != 1 {
+		t.Fatalf("sync = %q %+v", st, run)
+	}
+	if got := DeriveStep(f); got != StepQA {
+		t.Fatalf("step = %s", got)
+	}
+
+	// The CDN wait failed.
+	f = qaStartFacts("completed", "failure", cj("isv", "completed", "failure"))
+	q = QALanes(f, nil, true)
+	if q.State != "failure" || q.Error != "The download servers did not serve the pre-release in time." || q.URL != "run2" {
+		t.Fatalf("cdn failed: %+v", q)
+	}
+	// The CDN jobs of the QA run do not hold the sync back.
+	if st, _, _ := SyncCards(f); st != string(StateSuccess) {
+		t.Fatalf("sync with a failed QA-run CDN job = %q", st)
+	}
+
+	// Still waiting for the CDN: running, with the run to link to.
+	f = qaStartFacts("in_progress", "", cj("isv", "in_progress", ""))
+	q = QALanes(f, nil, true)
+	if q.State != "running" || q.Error != "" || q.URL != "run2" {
+		t.Fatalf("cdn running: %+v", q)
+	}
+
+	// The run has not created a job yet.
+	f = qaStartFacts("queued", "")
+	if q = QALanes(f, nil, true); q.State != "running" || q.URL != "run2" {
+		t.Fatalf("queued: %+v", q)
+	}
+
+	// A later run that did nothing (another label event) is not a failure.
+	f = qaStartFacts("completed", "success")
+	if q = QALanes(f, nil, true); q.State != "running" {
+		t.Fatalf("no-op run: %+v", q)
+	}
+
+	// Lanes ran: finished, whatever the conclusion.
+	f = qaStartFacts("completed", "failure", cj("isv", "completed", "success"),
+		Job{ID: 10, Name: JobLanePrefix + "packages / a", Status: "completed", Conclusion: "failure"})
+	if q = QALanes(f, nil, true); q.State != "finished" || len(q.Lanes) != 1 || q.Error != "" {
+		t.Fatalf("lanes: %+v", q)
+	}
+}

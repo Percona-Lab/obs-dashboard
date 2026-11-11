@@ -54,8 +54,10 @@ type Lane struct {
 }
 
 type QA struct {
-	State string `json:"state"` // waiting | running | finished
+	State string `json:"state"` // waiting | running | finished | failure
 	Lanes []Lane `json:"lanes"`
+	URL   string `json:"url"`   // the QA run; "" while none is known
+	Error string `json:"error"` // why QA could not run; set with state failure
 }
 
 type Final struct {
@@ -94,6 +96,7 @@ type Release struct {
 	Units     []UnitState    `json:"units"`
 	Cut       *RunRef        `json:"cut"`
 	SyncState string         `json:"sync_state"`
+	SyncURL   string         `json:"sync_url"` // the run the sync state was read from; "" while none
 	Sync      []InstanceCard `json:"sync"`
 	Removals  []Removal      `json:"removals"`
 	QA        *QA            `json:"qa"`
@@ -101,4 +104,10 @@ type Release struct {
 	StartedBy string         `json:"started_by"`
 	StartedAt *time.Time     `json:"started_at"`
 	Actions   []AuditEntry   `json:"actions"`
+
+	// Not sent to the browser: what the action guards need beyond the above.
+	syncRunDone  bool     // the run behind SyncState has completed
+	finalRunDone bool     // the release run has completed
+	pending      bool     // a cut was dispatched and GitHub does not list its run yet
+	pendingUnits []string // units of a pending first cut
 }
