@@ -58,13 +58,20 @@ func ReplaceSection(changelog []byte, id, section string) ([]byte, error) {
 		}
 	}
 
+	// The replaced section ends the file without a line terminator. Keep it
+	// that way when the replacement also has none, so the bytes stay identical.
+	bareEOF := end == len(lines) && !strings.HasSuffix(lines[end-1], "\n")
+
 	var out bytes.Buffer
 	for _, l := range lines[:start] {
 		out.WriteString(l)
 	}
-	for _, l := range repl {
+	for i, l := range repl {
 		body := strings.TrimSuffix(l, "\n")
 		out.WriteString(body)
+		if i == len(repl)-1 && bareEOF && !strings.HasSuffix(l, "\n") {
+			break
+		}
 		if crlf {
 			out.WriteString("\r\n")
 		} else {
