@@ -13,6 +13,12 @@ an example value. See `deploy/host/README.md`.
 
 ### Changed
 
+- Every place the release wizard waits now shows a spinner: the stage of the
+  cut in progress, the sync and the final sync before they start, instances
+  and QA lanes that are queued or running, QA before its lanes exist, and a
+  cut waiting for approval. The first cut stage now reads "Starting the cut
+  on GitHub".
+
 - While a release is being cut, the Release tab names the units being cut
   (for example `ppg:staging:16:tde`) where it showed the internal timestamp id.
 

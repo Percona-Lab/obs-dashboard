@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import { safeHref } from '../../lib/safeHref'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 import ReleaseConfirm from './ReleaseConfirm.vue'
 import ReleaseRemovals from './ReleaseRemovals.vue'
 import type { Lane, ReleaseState } from '../../types/release'
@@ -87,7 +88,8 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
         </div>
       </div>
 
-      <div v-if="!qaFailed || lanes.length" data-testid="qa-counts" class="flex gap-4 text-[13px]">
+      <div v-if="qa.state === 'running' && !lanes.length" data-testid="qa-starting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>Waiting for QA to start</span></div>
+      <div v-else-if="!qaFailed || lanes.length" data-testid="qa-counts" class="flex gap-4 text-[13px]">
         <span class="text-ok">{{ passed.length }} passed</span>
         <span class="text-fail">{{ failed.length }} failed</span>
         <span class="text-warn">{{ running.length }} running</span>
@@ -100,7 +102,7 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
           <a v-if="link(l).href" :href="link(l).href" target="_blank" rel="noopener noreferrer" class="ml-auto text-[12px] text-brand-purple">{{ link(l).text }}</a>
         </div>
         <div v-for="l in g.other" :key="l.name" data-testid="lane-running" class="flex items-center gap-3 py-1 text-[13px] text-text-secondary">
-          <span class="text-warn">◐</span><span class="font-mono">{{ l.name }}</span>
+          <ReleaseSpinner v-if="l.state === 'queued' || l.state === 'running'" /><span v-else class="text-warn">◐</span><span class="font-mono">{{ l.name }}</span>
         </div>
         <template v-if="g.passed.length">
           <button type="button" data-testid="toggle-passed" class="cursor-pointer border-0 bg-transparent p-0 text-[12px] text-brand-purple" @click="showPassed[g.key] = !showPassed[g.key]">{{ g.passed.length }} passed {{ g.passed.length === 1 ? 'lane' : 'lanes' }} · {{ showPassed[g.key] ? 'hide' : 'show' }}</button>

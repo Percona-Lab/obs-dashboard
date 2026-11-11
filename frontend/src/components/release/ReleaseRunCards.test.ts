@@ -9,6 +9,13 @@ const card = (o: Partial<InstanceCard> = {}): InstanceCard => ({
 })
 
 describe('ReleaseRunCards', () => {
+  it('spins on cards that are queued or running, not on finished ones', () => {
+    const w = mount(ReleaseRunCards, { props: { cards: [card({ instance: 'a', state: 'running' }), card({ instance: 'b', state: 'queued' }), card({ instance: 'c', state: 'success' }), card({ instance: 'd', state: 'failure' })] } })
+    const spins = w.findAll('[data-testid="run-card"]').map((c) => c.find('[data-testid="spinner"]').exists())
+    expect(spins).toEqual([true, true, false, false])
+    w.unmount()
+  })
+
   it('shows failed units and errors on a failed card', () => {
     const w = mount(ReleaseRunCards, { props: { cards: [card({ state: 'failure', failed_units: ['ppg-18'], errors: ['boom'] })] } })
     expect(w.text()).toContain('ppg-18')

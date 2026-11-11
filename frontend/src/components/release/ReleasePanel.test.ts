@@ -123,6 +123,7 @@ describe('ReleasePanel', () => {
       await w.get('[data-testid="cut-release"]').trigger('click')
       await flushPromises()
       expect(w.get('[data-testid="release-starting"]').text()).toContain('Starting the cut')
+      expect(w.find('[data-testid="release-starting"] [data-testid="spinner"]').exists()).toBe(true)
       snapshot.value = snap([])
       await flushPromises()
       expect(w.find('[data-testid="release-starting"]').exists()).toBe(true)

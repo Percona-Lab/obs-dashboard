@@ -21,9 +21,47 @@ const mountW = (o: Partial<ReleaseState> = {}) => mount(ReleaseWizard, { props: 
 beforeEach(() => { vi.clearAllMocks(); resetDraftsForTests(); document.body.innerHTML = '' })
 
 describe('ReleaseWizard', () => {
+  it('spins on the cut progress line that is in progress, and only on that one', () => {
+    const line = (w: ReturnType<typeof mountW>, text: string) => w.findAll('[data-testid="cut-line"]').find((l) => l.text().includes(text))!
+    const spin = (w: ReturnType<typeof mountW>, text: string) => line(w, text).find('[data-testid="spinner"]').exists()
+    const base = { step: 'cutting' as const, pr: 0, pr_url: '', head_sha: '' }
+
+    const queued = mountW({ ...base, cut: { state: 'queued', url: '' } })
+    expect(spin(queued, 'Starting the cut on GitHub')).toBe(true)
+    expect(spin(queued, 'Generating release files and changelogs')).toBe(false)
+    expect(queued.findAll('[data-testid="spinner"]')).toHaveLength(1)
+
+    const running = mountW({ ...base, cut: { state: 'running', url: '' } })
+    expect(spin(running, 'Starting the cut on GitHub')).toBe(false)
+    expect(spin(running, 'Generating release files and changelogs')).toBe(true)
+    expect(spin(running, 'Opening the release PR')).toBe(false)
+
+    const opening = mountW({ ...base, cut: { state: 'success', url: '' } })
+    expect(spin(opening, 'Generating release files and changelogs')).toBe(false)
+    expect(spin(opening, 'Opening the release PR')).toBe(true)
+
+    const failed = mountW({ ...base, cut: { state: 'failure', url: '' } })
+    expect(failed.find('[data-testid="cut-progress"] [data-testid="spinner"]').exists()).toBe(false)
+  })
+
+  it('spins while waiting for the sync to start, for approval and for the final sync', () => {
+    expect(mountW({ step: 'sync', sync_state: 'queued', sync: [] }).find('[data-testid="sync-waiting"] [data-testid="spinner"]').exists()).toBe(true)
+    expect(mountW({ step: 'sync', sync_state: 'running', sync: [] }).find('[data-testid="sync-waiting"] [data-testid="spinner"]').exists()).toBe(true)
+    expect(mountW({ step: 'cutting', pr: 0, pr_url: '', cut: { state: 'approval', url: 'https://run' } }).find('[data-testid="cut-approval"] [data-testid="spinner"]').exists()).toBe(true)
+
+    const noFinal = mountW({ step: 'releasing', final: null })
+    expect(noFinal.get('[data-testid="final-waiting"]').text()).toContain('Waiting for the final sync to start')
+    expect(noFinal.find('[data-testid="final-waiting"] [data-testid="spinner"]').exists()).toBe(true)
+
+    const fin = mountW({ step: 'releasing', final: { tags: [], instances: [], github_releases: 'running', cleanup: '', state: 'running', url: '' } })
+    expect(fin.find('[data-testid="final-github-releases"] [data-testid="spinner"]').exists()).toBe(true)
+    expect(fin.get('[data-testid="final-cleanup"]').find('[data-testid="spinner"]').exists()).toBe(false)
+    expect(fin.find('[data-testid="final-waiting"]').exists()).toBe(false)
+  })
+
   it('shows the cut progress and a retry on a failed cut', async () => {
     const w = mountW({ step: 'cutting', pr: 0, pr_url: '', head_sha: '', cut: { state: 'failure', url: 'https://run' } })
-    expect(w.text()).toContain('Release branch created')
+    expect(w.text()).toContain('Generating release files and changelogs')
     expect(w.text()).toContain('The cut failed')
     expect(w.get('[data-testid="cut-failed"] a').attributes('href')).toBe('https://run')
     await w.get('[data-testid="retry-cut"]').trigger('click')

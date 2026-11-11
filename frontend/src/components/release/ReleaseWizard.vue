@@ -7,6 +7,7 @@ import ReleaseQaStep from './ReleaseQaStep.vue'
 import ReleaseRemovals from './ReleaseRemovals.vue'
 import ReleaseRunCards from './ReleaseRunCards.vue'
 import { safeHref } from '../../lib/safeHref'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 import { hasDrafts } from '../../composables/useChangelogDrafts'
 import type { ReleaseState } from '../../types/release'
 
@@ -75,20 +76,22 @@ const STATE_CLS: Record<string, string> = { success: 'text-ok', failure: 'text-f
 const STATE_TXT: Record<string, string> = { success: 'done', failure: 'failed', running: 'running', queued: 'queued', skipped: 'skipped' }
 const retry = () => act(props.release.id, 'recut', props.release.head_sha)
 
-type Line = { icon: string; cls: string; text: string }
+// One line per stage of a cut. `spin` marks the stage that is in progress.
+type Line = { icon: string; cls: string; text: string; spin?: boolean }
+const DONE = { icon: '✓', cls: 'text-ok' }
+const TODO = { icon: '○', cls: 'text-text-muted' }
+const BUSY = { icon: '', cls: '', spin: true }
 const progress = computed<Line[]>(() => {
   const r = props.release
   const st = r.cut?.state
-  const gen: Line = st === 'success' ? { icon: '✓', cls: 'text-ok', text: 'Generating release files and changelogs' }
-    : st === 'failure' ? { icon: '✗', cls: 'text-fail', text: 'Generating release files and changelogs' }
-    : st === 'running' ? { icon: '◐', cls: 'text-warn', text: 'Generating release files and changelogs' }
-    : { icon: '○', cls: 'text-text-muted', text: 'Generating release files and changelogs' }
+  const started = st === 'running' || st === 'success' || st === 'failure'
   return [
-    { icon: r.cut ? '✓' : '◐', cls: r.cut ? 'text-ok' : 'text-warn', text: 'Release branch created' },
-    gen,
-    { icon: r.pr ? '✓' : '○', cls: r.pr ? 'text-ok' : 'text-text-muted', text: 'Opening the release PR' },
+    { ...(started ? DONE : BUSY), text: 'Starting the cut on GitHub' },
+    { ...(st === 'success' ? DONE : st === 'failure' ? { icon: '✗', cls: 'text-fail' } : st === 'running' ? BUSY : TODO), text: 'Generating release files and changelogs' },
+    { ...(r.pr ? DONE : st === 'success' ? BUSY : TODO), text: 'Opening the release PR' },
   ]
 })
+const waitingState = (s: string | undefined) => s === 'queued' || s === 'running'
 </script>
 
 <template>
@@ -127,13 +130,13 @@ const progress = computed<Line[]>(() => {
     </ol>
 
     <div v-if="cutHeld" data-testid="cut-approval" class="flex flex-col gap-2 rounded-[10px] border border-warn bg-warn-tint px-3 py-2 text-text-primary">
-      <span>Waiting for approval on GitHub. A person with write access must approve the workflow run before the cut starts.</span>
+      <span class="flex items-start gap-2"><ReleaseSpinner class="mt-[2px]" /><span>Waiting for approval on GitHub. A person with write access must approve the workflow run before the cut starts.</span></span>
       <a v-if="release.cut?.url && safeHref(release.cut.url)" :href="safeHref(release.cut.url)" target="_blank" rel="noopener noreferrer" class="self-start text-brand-purple">Open the run on GitHub</a>
     </div>
 
     <div v-else-if="release.step === 'cutting'" data-testid="cut-progress" class="rounded-[10px] border border-border p-4">
-      <div v-for="l in progress" :key="l.text" class="flex items-center gap-[10px] py-1">
-        <span class="w-4 text-center" :class="l.cls">{{ l.icon }}</span><span>{{ l.text }}</span>
+      <div v-for="l in progress" :key="l.text" data-testid="cut-line" class="flex items-center gap-[10px] py-1" :class="l.spin ? 'text-text-primary' : ''">
+        <span class="flex w-4 justify-center" :class="l.cls"><ReleaseSpinner v-if="l.spin" /><template v-else>{{ l.icon }}</template></span><span>{{ l.text }}</span>
       </div>
       <div v-if="cutFailed" data-testid="cut-failed" class="mt-3 flex flex-wrap items-center gap-3 text-fail">
         <b>The cut failed</b>
@@ -168,8 +171,8 @@ const progress = computed<Line[]>(() => {
             <span>The pre-release sync failed before any instance reported.</span>
             <a v-if="safeHref(release.sync_url)" :href="safeHref(release.sync_url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
           </div>
-          <div v-else-if="release.sync_state === 'running'" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">The sync is starting…</div>
-          <div v-else-if="release.sync_state === 'queued' || !release.sync_state" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">Waiting for the sync to start</div>
+          <div v-else-if="release.sync_state === 'running'" data-testid="sync-waiting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>The sync is starting…</span></div>
+          <div v-else-if="release.sync_state === 'queued' || !release.sync_state" data-testid="sync-waiting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>Waiting for the sync to start</span></div>
         </template>
         <ReleaseRunCards :cards="release.sync" />
         <div v-if="syncFailed && canAct" class="flex items-center gap-3">
@@ -186,10 +189,11 @@ const progress = computed<Line[]>(() => {
         <div v-if="release.final?.tags.length" data-testid="final-tags" class="flex flex-wrap gap-2">
           <span v-for="t in release.final.tags" :key="t" class="rounded-md border border-border px-2 py-[2px] font-mono text-[12px] text-text-secondary">{{ t }}</span>
         </div>
+        <div v-if="!release.final" data-testid="final-waiting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>Waiting for the final sync to start</span></div>
         <ReleaseRunCards :cards="release.final?.instances ?? []" />
         <div v-if="release.final" class="flex flex-col gap-1 text-[13px]">
-          <div data-testid="final-github-releases">Publish the GitHub releases: <span :class="STATE_CLS[release.final.github_releases]">{{ STATE_TXT[release.final.github_releases] ?? 'pending' }}</span></div>
-          <div data-testid="final-cleanup">Delete the pre-release: <span :class="STATE_CLS[release.final.cleanup]">{{ STATE_TXT[release.final.cleanup] ?? 'pending' }}</span></div>
+          <div data-testid="final-github-releases" class="flex items-center gap-2"><ReleaseSpinner v-if="waitingState(release.final.github_releases)" /><span>Publish the GitHub releases: <span :class="STATE_CLS[release.final.github_releases]">{{ STATE_TXT[release.final.github_releases] ?? 'pending' }}</span></span></div>
+          <div data-testid="final-cleanup" class="flex items-center gap-2"><ReleaseSpinner v-if="waitingState(release.final.cleanup)" /><span>Delete the pre-release: <span :class="STATE_CLS[release.final.cleanup]">{{ STATE_TXT[release.final.cleanup] ?? 'pending' }}</span></span></div>
           <a v-if="safeHref(release.final.url)" :href="safeHref(release.final.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
         </div>
         <div v-if="release.final?.state === 'failure'" data-testid="final-failed" class="text-fail">The final sync failed.</div>

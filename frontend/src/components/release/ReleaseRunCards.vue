@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { safeHref } from '../../lib/safeHref'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 import type { InstanceCard } from '../../types/release'
 
 const props = defineProps<{ cards: InstanceCard[] }>()
@@ -41,6 +42,7 @@ const LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', su
   <div class="flex flex-col gap-2">
     <div v-for="c in cards" :key="c.instance" data-testid="run-card" class="rounded-[10px] border border-border p-3">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <ReleaseSpinner v-if="c.state === 'queued' || c.state === 'running'" />
         <b class="text-text-primary">{{ c.instance }}</b>
         <span data-testid="card-state" class="rounded-full border px-2 py-[1px] text-[11px] font-semibold" :class="PILL[c.state]">{{ LABEL[c.state] ?? c.state }}</span>
         <small v-if="elapsed(c)" data-testid="card-elapsed" class="text-text-muted">{{ elapsed(c) }}</small>
