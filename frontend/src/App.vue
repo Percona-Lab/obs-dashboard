@@ -39,7 +39,11 @@ guardSettingsTab(mainTab)
 // Upgrade notices (header dot, host-update banner) are for signed-in users.
 watch(signedIn, (on) => (on ? startUpgradeNotices() : stopUpgradeNotices()), { immediate: true })
 // The Release tab exists only when the backend feature is on; poll only while it is open.
-watch(signedIn, (on) => { if (on) void release.loadStatus(); else release.enabled.value = false }, { immediate: true })
+watch(signedIn, (on) => {
+  if (!on) { release.enabled.value = false; return }
+  // Once the status is known, a disabled feature cannot be shown via the URL.
+  void release.loadStatus().then(() => { if (!release.enabled.value && mainTab.value === 'release') mainTab.value = 'overview' })
+}, { immediate: true })
 release.start(computed(() => mainTab.value === 'release' && signedIn.value))
 
 // Theme
