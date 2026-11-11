@@ -28,6 +28,7 @@ const (
 	auditApproveChangelog = "approve_changelog"
 	auditRetrySync        = "retry_sync"
 	auditApproveQA        = "approve_qa"
+	auditRetryQA          = "retry_qa"
 	auditRecut            = "recut"
 	auditRetryRelease     = "retry_release"
 	auditAbandon          = "abandon"
@@ -36,6 +37,92 @@ const (
 // recentCutTTL is how long a dispatched cut counts as in flight before GitHub
 // is expected to show it.
 const recentCutTTL = 2 * time.Minute
+
+// retryCooldown is how long a retry is not accepted again for the same
+// release: GitHub needs a moment to show the run the first one started.
+const retryCooldown = time.Minute
+
+// pendingCut is a cut the dashboard dispatched whose run GitHub does not list
+// yet. Until it does (or recentCutTTL passes) the release reads as cutting.
+type pendingCut struct {
+	at    time.Time // dispatch time, to the second as GitHub's run times are
+	units []string
+}
+
+// notePendingCut remembers a cut dispatched for branch at time at.
+func (s *Service) notePendingCut(branch string, at time.Time, units []string) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.pending == nil {
+		s.pending = map[string]pendingCut{}
+	}
+	s.pending[branch] = pendingCut{at: at, units: append([]string(nil), units...)}
+}
+
+// pendingCutOf returns the cut dispatched for branch that is still awaited.
+// The marker goes once a cut run created at or after the dispatch is listed,
+// or after recentCutTTL.
+func (s *Service) pendingCutOf(branch string, cutRuns []Run) (pendingCut, bool) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	p, ok := s.pending[branch]
+	if !ok {
+		return pendingCut{}, false
+	}
+	gone := s.now().Sub(p.at) >= recentCutTTL
+	name := CutRunName(branch)
+	for _, r := range cutRuns {
+		if r.Name == name && !r.CreatedAt.Before(p.at) {
+			gone = true
+		}
+	}
+	if gone {
+		delete(s.pending, branch)
+		return pendingCut{}, false
+	}
+	return p, true
+}
+
+// pendingBranches returns the branches with a cut still awaited.
+func (s *Service) pendingBranches(cutRuns []Run) []string {
+	s.cacheMu.Lock()
+	names := make([]string, 0, len(s.pending))
+	for b := range s.pending {
+		names = append(names, b)
+	}
+	s.cacheMu.Unlock()
+	sort.Strings(names)
+	var out []string
+	for _, b := range names {
+		if _, ok := s.pendingCutOf(b, cutRuns); ok {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// retriedRecently refuses a retry that was accepted for the same release less
+// than retryCooldown ago. s.actMu must be held.
+func (s *Service) retriedRecently(action, id string) error {
+	if at, ok := s.lastRetry[action+" "+id]; ok && s.now().Sub(at) < retryCooldown {
+		return fmt.Errorf("%w: this was retried a moment ago, give it a minute", ErrConflict)
+	}
+	return nil
+}
+
+// noteRetry records an accepted retry. s.actMu must be held.
+func (s *Service) noteRetry(action, id string) {
+	now := s.now()
+	if s.lastRetry == nil {
+		s.lastRetry = map[string]time.Time{}
+	}
+	for k, at := range s.lastRetry {
+		if now.Sub(at) >= retryCooldown {
+			delete(s.lastRetry, k)
+		}
+	}
+	s.lastRetry[action+" "+id] = now
+}
 
 // guardAny reads GitHub afresh and returns the release with id when it is a
 // dashboard release (not a fork PR) for which allowed holds. The email of the
@@ -55,6 +142,9 @@ func (s *Service) guardAny(ctx context.Context, id string, allowed func(Release)
 		}
 		if !r.Dashboard {
 			return Release{}, fmt.Errorf("%w: this release comes from a fork and cannot be changed here", ErrConflict)
+		}
+		if r.pending {
+			return Release{}, fmt.Errorf("%w: a cut was just started for this release, wait for it", ErrConflict)
 		}
 		if !allowed(r) {
 			return Release{}, fmt.Errorf("%w: this release is at step %q, which does not allow that action", ErrConflict, r.Step)
@@ -81,7 +171,12 @@ func cutIdle(r Release) bool {
 	return r.Cut == nil || (r.Cut.State != StateQueued && r.Cut.State != StateRunning)
 }
 
-func atChangelog(r Release) bool { return r.Step == StepChangelog && r.PR != 0 && cutIdle(r) }
+// atChangelog reports whether the changelog may be edited and approved. After
+// a failed re-cut the PR still shows the release as it was before: it stays
+// locked until a cut succeeds.
+func atChangelog(r Release) bool {
+	return r.Step == StepChangelog && r.PR != 0 && (r.Cut == nil || r.Cut.State == StateSuccess)
+}
 
 // ownsBranch reports whether the release branch was made by the dashboard
 // and so may be deleted by it.
@@ -158,6 +253,7 @@ func (s *Service) Cut(ctx context.Context, email string, units []string) (string
 	}
 	branch := BranchPrefix + ts.Format("20060102T150405")
 	joined := strings.Join(units, " ")
+	dispatchedAt := s.now().UTC().Truncate(time.Second)
 	if err := s.gh.Dispatch(ctx, WorkflowCut, map[string]string{"units": joined, "branch": branch}); err != nil {
 		return "", err
 	}
@@ -174,6 +270,7 @@ func (s *Service) Cut(ctx context.Context, email string, units []string) (string
 	for _, u := range units {
 		s.recentCuts[u] = now
 	}
+	s.notePendingCut(branch, dispatchedAt, units)
 	s.recordRow(email, auditCut, branch, 0, joined)
 	s.Invalidate()
 	return strings.TrimPrefix(branch, BranchPrefix), nil
@@ -275,8 +372,12 @@ func (s *Service) ApproveChangelog(ctx context.Context, email, id, head string) 
 func (s *Service) RetrySync(ctx context.Context, email, id, head string) error {
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
+	if err := s.retriedRecently(auditRetrySync, id); err != nil {
+		return err
+	}
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
-		return r.Step == StepSync && r.PR != 0 && r.SyncState == string(StateFailure)
+		// A run that is still going would be joined by a second one.
+		return r.Step == StepSync && r.PR != 0 && r.SyncState == string(StateFailure) && r.syncRunDone
 	})
 	if err != nil {
 		return err
@@ -287,6 +388,7 @@ func (s *Service) RetrySync(ctx context.Context, email, id, head string) error {
 	if err := s.gh.AddLabel(ctx, r.PR, LabelSync); err != nil {
 		return err
 	}
+	s.noteRetry(auditRetrySync, id)
 	s.record(email, auditRetrySync, r, "")
 	s.Invalidate()
 	return nil
@@ -306,6 +408,32 @@ func (s *Service) ApproveQA(ctx context.Context, email, id, head string) error {
 		return err
 	}
 	s.record(email, auditApproveQA, r, "")
+	s.Invalidate()
+	return nil
+}
+
+// RetryQA starts QA again after it failed to start (the CDN wait or the lane
+// matrix failed): the qa-release label comes off and goes back on.
+func (s *Service) RetryQA(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	if err := s.retriedRecently(auditRetryQA, id); err != nil {
+		return err
+	}
+	r, err := s.guard(ctx, id, head, func(r Release) bool {
+		return r.Step == StepQA && r.PR != 0 && r.QA != nil && r.QA.State == "failure"
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.gh.RemoveLabel(ctx, r.PR, LabelQA); err != nil {
+		return err
+	}
+	if err := s.gh.AddLabel(ctx, r.PR, LabelQA); err != nil {
+		return err
+	}
+	s.noteRetry(auditRetryQA, id)
+	s.record(email, auditRetryQA, r, "")
 	s.Invalidate()
 	return nil
 }
@@ -344,9 +472,11 @@ func (s *Service) Recut(ctx context.Context, email, id, head string) error {
 		}
 	}
 	joined := strings.Join(units, " ")
+	dispatchedAt := s.now().UTC().Truncate(time.Second)
 	if err := s.gh.Dispatch(ctx, WorkflowCut, map[string]string{"units": joined, "branch": r.Branch}); err != nil {
 		return err
 	}
+	s.notePendingCut(r.Branch, dispatchedAt, units)
 	s.record(email, auditRecut, r, joined)
 	s.Invalidate()
 	return nil
@@ -418,8 +548,12 @@ func (s *Service) Release(ctx context.Context, email, id, head string, confirmFa
 func (s *Service) RetryRelease(ctx context.Context, email, id string) error {
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
+	if err := s.retriedRecently(auditRetryRelease, id); err != nil {
+		return err
+	}
 	r, err := s.guardAny(ctx, id, func(r Release) bool {
-		return r.Step == StepReleasing && r.PR != 0 && r.Final != nil && r.Final.State == StateFailure
+		// A run that is still going would be joined by a second one.
+		return r.Step == StepReleasing && r.PR != 0 && r.Final != nil && r.Final.State == StateFailure && r.finalRunDone
 	})
 	if err != nil {
 		return err
@@ -435,6 +569,7 @@ func (s *Service) RetryRelease(ctx context.Context, email, id string) error {
 	if err != nil {
 		return err
 	}
+	s.noteRetry(auditRetryRelease, id)
 	s.record(email, auditRetryRelease, r, "")
 	s.Invalidate()
 	return nil
@@ -449,6 +584,11 @@ func (s *Service) Abandon(ctx context.Context, email, id, head string) error {
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
 		if !cutIdle(r) {
 			// The running cut would create the branch again.
+			return false
+		}
+		if r.PR == 0 && r.HeadSHA == "" && r.Cut != nil && r.Cut.State == StateFailure {
+			// A first cut that failed left no branch and no PR: there is
+			// nothing to give up, and the row leaves the list by itself.
 			return false
 		}
 		switch r.Step {
