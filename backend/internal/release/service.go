@@ -346,8 +346,12 @@ type mainUnit struct {
 
 type jobReport struct {
 	failedUnits []string
-	removals    []Removal
-	errors      []string
+	// skippedUnits are the entries with outcome "skipped"; entries counts
+	// every entry of the report.
+	skippedUnits []string
+	entries      int
+	removals     []Removal
+	errors       []string
 }
 
 type tagPull struct {
@@ -892,6 +896,8 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 			for i := range cards {
 				if cards[i].Instance == inst {
 					cards[i].FailedUnits = append(cards[i].FailedUnits, rep.failedUnits...)
+					cards[i].SkippedUnits = append(cards[i].SkippedUnits, rep.skippedUnits...)
+					cards[i].NothingToSync = cards[i].State == StateSuccess && rep.entries > 0 && len(rep.skippedUnits) == rep.entries
 					cards[i].Errors = append(cards[i].Errors, rep.errors...)
 				}
 			}
@@ -1007,8 +1013,14 @@ func (s *Service) populateReport(ctx context.Context, run Run, j Job, instance s
 			Removals []string `json:"removals"`
 		}
 		if json.Unmarshal(data, &entries) == nil {
+			rep.entries = len(entries)
 			for _, e := range entries {
-				if e.Outcome != "success" {
+				switch e.Outcome {
+				case "success":
+				case "skipped":
+					// The instance holds nothing of this project.
+					rep.skippedUnits = append(rep.skippedUnits, e.Project)
+				default:
 					rep.failedUnits = append(rep.failedUnits, e.Project)
 				}
 				for _, item := range e.Removals {

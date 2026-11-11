@@ -44,11 +44,13 @@ const LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', su
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
         <ReleaseSpinner v-if="c.state === 'queued' || c.state === 'running'" />
         <b class="text-text-primary">{{ c.instance }}</b>
-        <span data-testid="card-state" class="rounded-full border px-2 py-[1px] text-[11px] font-semibold" :class="PILL[c.state]">{{ LABEL[c.state] ?? c.state }}</span>
+        <span data-testid="card-state" class="rounded-full border px-2 py-[1px] text-[11px] font-semibold" :class="c.nothing_to_sync ? PILL.queued : PILL[c.state]">{{ c.nothing_to_sync ? 'Nothing to sync' : (LABEL[c.state] ?? c.state) }}</span>
         <small v-if="elapsed(c)" data-testid="card-elapsed" class="text-text-muted">{{ elapsed(c) }}</small>
         <a v-if="safeHref(c.url)" :href="safeHref(c.url)" target="_blank" rel="noopener noreferrer" class="ml-auto text-[12px] text-brand-purple">View log on GitHub</a>
       </div>
       <div v-if="cdnNote(c)" data-testid="card-cdn" class="mt-1 text-[12px] text-warn">{{ cdnNote(c) }}</div>
+      <div v-if="c.nothing_to_sync" data-testid="card-nothing" class="mt-1 text-[12px] text-text-muted">This instance holds nothing of this release.</div>
+      <div v-else-if="c.skipped_units?.length" data-testid="card-skipped" class="mt-1 text-[12px] text-text-muted">Not on this instance: <span class="font-mono">{{ c.skipped_units.join(', ') }}</span></div>
       <div v-if="c.state === 'failure'" data-testid="card-failure" class="mt-2 text-[12px]">
         <div v-if="c.failed_units.length" class="text-fail">Failed units: <span class="font-mono">{{ c.failed_units.join(', ') }}</span></div>
         <ul v-if="c.errors.length" class="m-0 mt-1 list-disc pl-5 text-text-secondary">

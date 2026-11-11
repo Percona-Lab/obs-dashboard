@@ -198,7 +198,7 @@ func SyncCards(f Facts) (string, []InstanceCard, *Run) {
 		cards = append(cards, InstanceCard{
 			Instance: inst, State: jobState(j), URL: j.HTMLURL,
 			StartedAt: j.StartedAt, FinishedAt: j.CompletedAt,
-			FailedUnits: []string{}, Errors: []string{},
+			FailedUnits: []string{}, Errors: []string{}, SkippedUnits: []string{},
 		})
 	}
 	failed, allOK := false, true
@@ -355,7 +355,7 @@ func FinalStatus(f Facts) *Final {
 			fin.Instances = append(fin.Instances, InstanceCard{
 				Instance: inst, State: jobState(j), URL: j.HTMLURL,
 				StartedAt: j.StartedAt, FinishedAt: j.CompletedAt,
-				FailedUnits: []string{}, Errors: []string{},
+				FailedUnits: []string{}, Errors: []string{}, SkippedUnits: []string{},
 			})
 		} else if j.Name == JobFinalize {
 			if isSkipped(j) {

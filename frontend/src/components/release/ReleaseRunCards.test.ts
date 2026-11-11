@@ -5,10 +5,26 @@ import ReleaseRunCards from './ReleaseRunCards.vue'
 import type { InstanceCard } from '../../types/release'
 
 const card = (o: Partial<InstanceCard> = {}): InstanceCard => ({
-  instance: 'obs-a', state: 'running', url: 'https://github.com/o/r/actions/runs/1', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [], ...o,
+  instance: 'obs-a', state: 'running', url: 'https://github.com/o/r/actions/runs/1', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [], skipped_units: [], nothing_to_sync: false, ...o,
 })
 
 describe('ReleaseRunCards', () => {
+  it('says so when an instance had nothing to sync, and names units it skipped', () => {
+    const w = mount(ReleaseRunCards, { props: { cards: [
+      card({ instance: 'labs', state: 'success', nothing_to_sync: true, skipped_units: ['ppg:releases:16:tde'] }),
+      card({ instance: 'mixed', state: 'success', skipped_units: ['ppg:releases:16:tde'] }),
+      card({ instance: 'obs', state: 'success' }),
+    ] } })
+    const [labs, mixed, obs] = w.findAll('[data-testid="run-card"]')
+    expect(labs.get('[data-testid="card-state"]').text()).toBe('Nothing to sync')
+    expect(labs.find('[data-testid="card-skipped"]').exists()).toBe(false)
+    expect(mixed.get('[data-testid="card-state"]').text()).toBe('Done')
+    expect(mixed.get('[data-testid="card-skipped"]').text()).toContain('ppg:releases:16:tde')
+    expect(obs.get('[data-testid="card-state"]').text()).toBe('Done')
+    expect(obs.find('[data-testid="card-skipped"]').exists()).toBe(false)
+    w.unmount()
+  })
+
   it('spins on cards that are queued or running, not on finished ones', () => {
     const w = mount(ReleaseRunCards, { props: { cards: [card({ instance: 'a', state: 'running' }), card({ instance: 'b', state: 'queued' }), card({ instance: 'c', state: 'success' }), card({ instance: 'd', state: 'failure' })] } })
     const spins = w.findAll('[data-testid="run-card"]').map((c) => c.find('[data-testid="spinner"]').exists())

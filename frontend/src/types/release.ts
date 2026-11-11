@@ -32,6 +32,10 @@ export interface InstanceCard {
   finished_at: string | null
   cdn: string
   failed_units: string[]
+  /** Release projects the instance holds nothing of (populate report outcome "skipped"). */
+  skipped_units: string[]
+  /** The job succeeded and every entry of its report was skipped. */
+  nothing_to_sync: boolean
   errors: string[]
 }
 

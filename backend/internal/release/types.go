@@ -43,6 +43,12 @@ type InstanceCard struct {
 	CDN         string     `json:"cdn"` // "" | queued | running | success | failure | skipped
 	FailedUnits []string   `json:"failed_units"`
 	Errors      []string   `json:"errors"`
+	// SkippedUnits are the release projects the populate report marks
+	// "skipped": this instance holds nothing of them.
+	SkippedUnits []string `json:"skipped_units"`
+	// NothingToSync is true when the job succeeded and every entry of its
+	// report was skipped: the instance had nothing to populate.
+	NothingToSync bool `json:"nothing_to_sync"`
 }
 
 type Removal struct {
