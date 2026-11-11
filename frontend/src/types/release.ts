@@ -1,4 +1,5 @@
 // JSON shapes emitted by /api/release/* (snake_case, mirrors backend/internal/release).
+// The backend never lists a release at step 'done': finished releases leave the snapshot.
 export type ReleaseStep = 'cutting' | 'changelog' | 'sync' | 'qa' | 'releasing'
 export type RunState = 'queued' | 'running' | 'success' | 'failure'
 
