@@ -756,6 +756,7 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 	rel := Release{
 		ID: c.id, Branch: c.branch, HeadSHA: c.branchSHA, Dashboard: !c.fork,
 		Units: []UnitState{}, Sync: []InstanceCard{}, Removals: []Removal{}, Actions: []AuditEntry{},
+		CutUnits: []string{},
 	}
 	f := Facts{Pull: c.pull, Jobs: map[int64][]Job{}, Annotations: map[int64][]Annotation{}}
 	var generated map[string]string
@@ -836,6 +837,11 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 		if a.Action == auditCut && rel.StartedAt == nil {
 			at := a.At
 			rel.StartedBy, rel.StartedAt = a.Email, &at
+		}
+	}
+	if len(rel.Units) == 0 && !c.fork {
+		if u := cutUnits(audit); len(u) > 0 {
+			rel.CutUnits = u
 		}
 	}
 	return rel, nil

@@ -14,7 +14,7 @@ vi.mock('../../composables/useRelease', () => ({
 const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
   id: 'r1', branch: 'b', pr: 5, pr_url: 'https://github.com/o/r/pull/5', head_sha: 'abc', step: 'sync', dashboard: true,
   units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '18.6-6', tag: '', changelog: 'text', generated: null }],
-  cut: null, sync_state: '', sync_url: '', sync: [], removals: [], qa: null, final: null, started_by: 'me', started_at: null, actions: [], ...o,
+  cut: null, sync_state: '', sync_url: '', sync: [], removals: [], qa: null, final: null, started_by: 'me', started_at: null, actions: [], cut_units: [], ...o,
 })
 const mountW = (o: Partial<ReleaseState> = {}) => mount(ReleaseWizard, { props: { release: rel(o) }, attachTo: document.body })
 
@@ -60,6 +60,12 @@ describe('ReleaseWizard', () => {
       expect(s[0].attributes('data-state')).toBe('done')
       expect(s[1].attributes('data-state')).toBe('on')
     }
+  })
+
+  it('names the units being cut in the strip while there is no release id yet', () => {
+    const w = mountW({ id: '20261111T230450', step: 'cutting', pr: 0, pr_url: '', units: [], cut: { state: 'running', url: '' }, cut_units: ['ppg:staging:16:tde'] })
+    expect(w.text()).toContain('ppg:staging:16:tde')
+    expect(w.text()).not.toContain('20261111T230450')
   })
 
   it('hides abandon while releasing', () => {

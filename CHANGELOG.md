@@ -11,6 +11,11 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- While a release is being cut, the Release tab names the units being cut
+  (for example `ppg:staging:16:tde`) where it showed the internal timestamp id.
+
 ## [0.2.1] - 2026-11-11
 
 ### Added

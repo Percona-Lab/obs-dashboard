@@ -80,6 +80,8 @@ export interface ReleaseState {
   started_by: string
   started_at: string | null
   actions: { at: string; email: string; action: string }[]
+  /** Unit roots asked for, while `units` is still empty (the cut has not produced them yet). */
+  cut_units: string[]
 }
 
 export interface Snapshot {

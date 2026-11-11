@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import ReleasePanel from './ReleasePanel.vue'
 import { useRelease, resetReleaseForTests } from '../../composables/useRelease'
 import { resetAuthForTests } from '../../composables/useAuth'
@@ -10,7 +10,7 @@ const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
   id: 'r1', branch: 'release/r1', pr: 412, pr_url: 'https://github.com/o/r/pull/412', head_sha: 'abc', step: 'qa',
   dashboard: true, units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '17.10-2', tag: '', changelog: '', generated: null }],
   cut: null, sync_state: '', sync_url: '', sync: [], removals: [], qa: null, final: null,
-  started_by: '', started_at: null, actions: [], ...o,
+  started_by: '', started_at: null, actions: [], cut_units: [], ...o,
 })
 const snap = (releases: ReleaseState[], o: Partial<Snapshot> = {}): Snapshot => ({ releases, stale: false, error: '', refreshed_at: '', ...o })
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 })
@@ -20,8 +20,22 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(json(url.includes('/history') ? { rows: [] } : { units: [] }))))
 })
 afterEach(() => vi.unstubAllGlobals())
+// A panel left mounted reloads the units when the shared state is reset for the next test.
+enableAutoUnmount(afterEach)
 
 describe('ReleasePanel', () => {
+  it('names the units being cut while the release has no release id yet', async () => {
+    useRelease().snapshot.value = snap([
+      rel({ id: '20261111T230450', step: 'cutting', pr: 0, pr_url: '', units: [], cut: { state: 'running', url: '' }, cut_units: ['ppg:staging:16:tde', 'ppg:staging:18'] }),
+      rel({ id: 'pr-9', step: 'cutting', pr: 0, pr_url: '', units: [], cut: { state: 'running', url: '' } }),
+    ])
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    expect(w.get('[data-release="20261111T230450"] [data-testid="open-in-flight"]').text()).toBe('ppg:staging:16:tde, ppg:staging:18')
+    // nothing known about the units: the release's own id
+    expect(w.get('[data-release="pr-9"] [data-testid="open-in-flight"]').text()).toBe('pr-9')
+  })
+
   it('shows loading indicators until the releases, the units and the history have loaded', async () => {
     let release!: (r: Response) => void
     const pending = new Promise<Response>((res) => { release = res })
