@@ -25,7 +25,9 @@ const cutHeld = computed(() => props.release.step === 'cutting' && props.release
 const cutFailed = computed(() => (props.release.step === 'cutting' || props.release.step === 'changelog') && props.release.cut?.state === 'failure')
 // A first cut that failed left no branch and no PR: there is nothing to abandon.
 const nothingToAbandon = computed(() => !props.release.pr && !props.release.head_sha && props.release.cut?.state === 'failure')
-const showAbandon = computed(() => canAct.value && props.release.step !== 'releasing' && !(props.release.step === 'cutting' && cutRunning.value) && !nothingToAbandon.value && !(cutHeld.value && !props.release.pr))
+const showAbandon = computed(() => canAct.value && props.release.step !== 'releasing' && !nothingToAbandon.value && !(cutHeld.value && !props.release.pr))
+// The backend refuses Abandon while a cut is queued or running: the cut would re-create the branch.
+const abandonBlocked = computed(() => props.release.step === 'cutting' && cutRunning.value)
 const showRecut = computed(() => canAct.value && !handMade.value && (props.release.step === 'sync' || props.release.step === 'qa'))
 const showRetry = computed(() => canAct.value && !handMade.value && cutFailed.value)
 const readOnly = computed(() => ['sync', 'qa', 'releasing'].includes(props.release.step))
@@ -101,7 +103,7 @@ const progress = computed<Line[]>(() => {
       </div>
       <div class="flex gap-2">
         <button v-if="showRecut" type="button" data-testid="recut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="openDialog('recut')">Update to latest main &amp; restart</button>
-        <button v-if="showAbandon" type="button" data-testid="abandon" :disabled="busy" class="cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:opacity-50" @click="openDialog('abandon')">Abandon release</button>
+        <button v-if="showAbandon" type="button" data-testid="abandon" :disabled="busy || abandonBlocked" :title="abandonBlocked ? 'Wait for the cut to finish before abandoning.' : undefined" class="cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:cursor-not-allowed disabled:opacity-50" @click="openDialog('abandon')">Abandon release</button>
       </div>
     </div>
 
