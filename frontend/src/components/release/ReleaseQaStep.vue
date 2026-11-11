@@ -61,6 +61,8 @@ async function doRelease() {
   if (d && qa.value?.state === 'finished') await act(d.id, 'release', d.head, d.confirmFailed)
 }
 const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha)
+const retryQa = () => act(props.release.id, 'retry-qa', props.release.head_sha)
+const qaFailed = computed(() => qa.value?.state === 'failure')
 </script>
 
 <template>
@@ -74,7 +76,18 @@ const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha
     </template>
 
     <template v-else>
-      <div data-testid="qa-counts" class="flex gap-4 text-[13px]">
+      <div v-if="qaFailed" data-testid="qa-failed" class="flex flex-col gap-2 rounded-[10px] border border-fail p-3">
+        <div class="flex flex-wrap items-center gap-3 text-fail">
+          <b>{{ qa.error || 'QA could not start.' }}</b>
+          <a v-if="safeHref(qa.url)" :href="safeHref(qa.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
+        </div>
+        <div v-if="canAct" class="flex flex-wrap items-center gap-3">
+          <button type="button" data-testid="retry-qa" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryQa">Retry QA</button>
+          <small class="text-text-muted">Or use "Update to latest main &amp; restart" above.</small>
+        </div>
+      </div>
+
+      <div v-if="!qaFailed || lanes.length" data-testid="qa-counts" class="flex gap-4 text-[13px]">
         <span class="text-ok">{{ passed.length }} passed</span>
         <span class="text-fail">{{ failed.length }} failed</span>
         <span class="text-warn">{{ running.length }} running</span>
@@ -106,7 +119,8 @@ const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha
 
       <div v-if="canAct" class="flex items-center gap-3">
         <button type="button" data-testid="release" :disabled="!canRelease" class="cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="openRelease">Release</button>
-        <small v-if="qa.state !== 'finished'" class="text-text-muted">Available once every QA lane has finished.</small>
+        <small v-if="qaFailed" class="text-text-muted">Not available: QA did not run.</small>
+        <small v-else-if="qa.state !== 'finished'" class="text-text-muted">Available once every QA lane has finished.</small>
       </div>
     </template>
 

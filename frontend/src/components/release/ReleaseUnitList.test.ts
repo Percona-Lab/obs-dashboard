@@ -77,4 +77,13 @@ describe('ReleaseUnitList', () => {
     await w.get('[data-testid="cut-release"]').trigger('click')
     expect(w.emitted('cut')![1]).toEqual([['ppg:staging:18']])
   })
+
+  it('the not-built alert opens the Builds tab', async () => {
+    const w = mk()
+    const btn = w.get('[data-unit="ppg:staging:18:extras"] button[data-testid="open-builds"]')
+    expect(btn.text()).toBe('Open in Builds')
+    await btn.trigger('click')
+    expect(w.emitted('open-builds')).toHaveLength(1)
+    expect(w.find('[data-unit="ppg:staging:17"] [data-testid="open-builds"]').exists()).toBe(false)
+  })
 })

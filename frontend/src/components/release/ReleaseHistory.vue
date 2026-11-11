@@ -5,7 +5,6 @@ import { parseChangelog, segments, type PreviewNode } from '../../lib/changelogP
 import { safeHref } from '../../lib/safeHref'
 import type { HistoryRow } from '../../types/release'
 
-const PAGE_SIZE = 20
 const { loadHistory } = useRelease()
 
 const rows = ref<HistoryRow[]>([])
@@ -22,9 +21,10 @@ async function loadNext() {
   loading.value = false
   if (got === null) { failed.value = true; return }
   failed.value = false
-  if (got.length) page.value += 1
-  rows.value = [...rows.value, ...got]
-  more.value = got.length >= PAGE_SIZE
+  // The server says whether a further page exists: a page can hold few rows, or none.
+  page.value += 1
+  rows.value = [...rows.value, ...got.rows]
+  more.value = got.more
 }
 onMounted(loadNext)
 

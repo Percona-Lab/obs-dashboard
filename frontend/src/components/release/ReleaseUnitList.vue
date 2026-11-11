@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { UnitRow } from '../../types/release'
 
 const props = defineProps<{ units: UnitRow[]; busy: boolean; error: string }>()
-const emit = defineEmits<{ cut: [units: string[]]; open: [releaseId: string] }>()
+const emit = defineEmits<{ cut: [units: string[]]; open: [releaseId: string]; 'open-builds': [] }>()
 
 const ticked = ref<string[]>([])
 
@@ -92,6 +92,13 @@ const pillClass = (u: UnitRow) => {
               class="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-brand-purple underline"
               @click="emit('open', u.blocked.release_id!)"
             >Continue that release</button>
+            <button
+              v-if="u.blocked.reason === 'not_built'"
+              data-testid="open-builds"
+              type="button"
+              class="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-brand-purple underline"
+              @click="emit('open-builds')"
+            >Open in Builds</button>
           </div>
         </div>
       </section>

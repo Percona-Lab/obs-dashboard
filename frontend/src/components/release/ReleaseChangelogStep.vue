@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import ReleaseConfirm from './ReleaseConfirm.vue'
+import { dropDraft, getDraft, sameText, setDraft } from '../../composables/useChangelogDrafts'
 import { parseChangelog, segments } from '../../lib/changelogPreview'
 import type { ReleaseState } from '../../types/release'
 
@@ -14,21 +15,32 @@ const synced = reactive<Record<string, string>>({}) // changelog text the editor
 const syncedHead = reactive<Record<string, string>>({}) // head_sha it came from
 const conflict = reactive<Record<string, boolean>>({})
 
-const editable = computed(() => props.release.dashboard)
+// After a failed re-cut the PR still holds the release as it was: nothing is
+// edited or approved until a cut succeeds.
+const locked = computed(() => props.release.cut?.state === 'failure')
+const editable = computed(() => props.release.dashboard && !locked.value)
 
 // Per unit: `synced` is the changelog the editor was last synced with. A unit is in conflict only
 // when its changelog changed upstream while it has unsaved edits; a head move alone is not a conflict.
+// Texts are compared with sameText: trailing newlines and CRLF vs LF are not a difference.
 watch(() => props.release, (r) => {
   for (const u of r.units) {
     if (!(u.unit in text)) {
-      text[u.unit] = u.changelog; synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha
+      // Unsaved text from an earlier visit (the drafts outlive this component) comes back.
+      const d = getDraft(r.id, u.unit)
+      if (d && !sameText(d.text, u.changelog)) {
+        text[u.unit] = d.text; synced[u.unit] = d.synced; syncedHead[u.unit] = r.head_sha
+        conflict[u.unit] = !sameText(u.changelog, d.synced)
+      } else {
+        text[u.unit] = u.changelog; synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha
+      }
       continue
     }
-    if (u.changelog === text[u.unit]) { // saved, reset or discarded: in line with the snapshot
+    if (sameText(u.changelog, text[u.unit])) { // saved, reset or discarded: in line with the snapshot
       synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha; conflict[u.unit] = false
-    } else if (u.changelog === synced[u.unit]) { // unchanged upstream, the edits stay
+    } else if (sameText(u.changelog, synced[u.unit])) { // unchanged upstream, the edits stay
       syncedHead[u.unit] = r.head_sha
-    } else if (text[u.unit] === synced[u.unit]) { // changed upstream, no edits: take it
+    } else if (sameText(text[u.unit], synced[u.unit])) { // changed upstream, no edits: take it
       text[u.unit] = u.changelog; synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha; conflict[u.unit] = false
     } else {
       conflict[u.unit] = true
@@ -40,15 +52,29 @@ watch(() => props.release, (r) => {
 const unit = computed(() => props.release.units.find((u) => u.unit === active.value))
 const dirty = (name: string) => {
   const u = props.release.units.find((x) => x.unit === name)
-  return !!u && (text[name] ?? '') !== u.changelog
+  return !!u && !sameText(text[name] ?? '', u.changelog)
 }
+// Unsaved text is mirrored into the drafts, which outlive this component.
+watch([text, synced, () => props.release], () => {
+  for (const u of props.release.units) {
+    if (dirty(u.unit)) setDraft(props.release.id, u.unit, { text: text[u.unit], synced: synced[u.unit] ?? u.changelog })
+    else dropDraft(props.release.id, u.unit)
+  }
+}, { deep: true, flush: 'sync' })
 const anyDirty = computed(() => props.release.units.some((u) => dirty(u.unit)))
 const nodes = computed(() => parseChangelog(text[active.value] ?? ''))
 
 async function save() {
   const u = unit.value
   if (!u) return
-  await saveChangelog(props.release.id, props.release.head_sha, u.unit, text[u.unit])
+  const t = { head: props.release.head_sha, unit: u.unit, sent: text[u.unit] }
+  if (!(await saveChangelog(props.release.id, t.head, t.unit, t.sent))) return
+  await nextTick()
+  // The backend stores the section its own way (every line terminated): take the stored text, as
+  // doReset does, unless the refresh did not show the save yet or the user typed on meanwhile.
+  const cur = props.release.units.find((x) => x.unit === t.unit)
+  if (!cur || props.release.head_sha === t.head || text[t.unit] !== t.sent) return
+  text[t.unit] = cur.changelog; synced[t.unit] = cur.changelog; syncedHead[t.unit] = props.release.head_sha; conflict[t.unit] = false
 }
 const resetDialog = ref<{ id: string; head: string; unit: string; releaseId: string } | null>(null)
 function reset() {
@@ -92,7 +118,7 @@ async function approve() {
     <div v-if="unit" class="grid grid-cols-1 gap-[10px] md:grid-cols-2">
       <div class="rounded-[10px] border border-border p-3">
         <h5 class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[.06em] text-text-muted">Edit</h5>
-        <textarea v-model="text[unit.unit]" data-testid="changelog-editor" :readonly="!editable" spellcheck="false"
+        <textarea v-model="text[unit.unit]" data-testid="changelog-editor" :readonly="!editable" aria-label="Changelog text" spellcheck="false"
           class="min-h-[250px] w-full resize-y border-0 bg-transparent font-mono text-[12px] leading-[1.55] text-text-primary outline-none"></textarea>
       </div>
       <div class="rounded-[10px] border border-border p-3" data-testid="changelog-preview">

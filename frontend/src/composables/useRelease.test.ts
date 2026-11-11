@@ -3,11 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { useRelease, resetReleaseForTests } from './useRelease'
 import { resetAuthForTests } from './useAuth'
+import { getDraft, hasDrafts, resetDraftsForTests, setDraft } from './useChangelogDrafts'
 
 const snap = { releases: [], stale: false, error: '', refreshed_at: '2026-11-11T00:00:00Z' }
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status })
 
-beforeEach(() => { vi.useFakeTimers(); resetAuthForTests(); resetReleaseForTests() })
+beforeEach(() => { vi.useFakeTimers(); resetAuthForTests(); resetReleaseForTests(); resetDraftsForTests() })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('useRelease', () => {
@@ -128,8 +129,8 @@ describe('useRelease', () => {
   })
 
   it('loadHistory returns rows', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ rows: [{ tag: 't' }] }))))
-    expect(await useRelease().loadHistory(2)).toEqual([{ tag: 't' }])
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ rows: [{ tag: 't' }], more: true }))))
+    expect(await useRelease().loadHistory(2)).toEqual({ rows: [{ tag: 't' }], more: true })
     expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/api/release/history?page=2')
   })
 
@@ -175,5 +176,37 @@ describe('useRelease', () => {
     gets[0](snapA)
     await vi.advanceTimersByTimeAsync(0)
     expect(r.snapshot.value?.error).toBe('B')
+  })
+
+  it('loadHistory reads an answer without "more" as the last page', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ rows: [] }))))
+    expect(await useRelease().loadHistory(1)).toEqual({ rows: [], more: false })
+  })
+
+  it('sends retry-qa like the other actions', async () => {
+    const f = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(json(snap)))
+    vi.stubGlobal('fetch', f)
+    expect(await useRelease().act('r1', 'retry-qa', 'h')).toBe(true)
+    expect(f.mock.calls[0][0]).toBe('/api/release/releases/r1/retry-qa')
+    expect(f.mock.calls[0][1]!.method).toBe('POST')
+  })
+
+  it('a refresh drops the drafts of releases that left the snapshot, and drafts equal to it', async () => {
+    const unit = (name: string, changelog: string) => ({ unit: name, release_project: '', release_dir: '', release_id: '1', tag: '', changelog, generated: null })
+    setDraft('gone', 'u', { text: 'mine', synced: 'orig' })
+    setDraft('here', 'u', { text: 'mine', synced: 'orig' })
+    setDraft('here', 'same', { text: 'saved\n', synced: 'orig' })
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ ...snap, releases: [{ id: 'here', units: [unit('u', 'orig'), unit('same', 'saved')] }] }))))
+    await useRelease().refresh()
+    expect(hasDrafts('gone')).toBe(false)
+    expect(getDraft('here', 'u')).toEqual({ text: 'mine', synced: 'orig' })
+    expect(getDraft('here', 'same')).toBeUndefined()
+  })
+
+  it('a failed refresh keeps every draft', async () => {
+    setDraft('r1', 'u', { text: 'mine', synced: 'orig' })
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('x', { status: 502 }))))
+    await useRelease().refresh()
+    expect(hasDrafts('r1')).toBe(true)
   })
 })
