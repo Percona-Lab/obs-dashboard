@@ -18,9 +18,11 @@ import (
 	"github.com/percona/obs-dashboard/internal/cve"
 	"github.com/percona/obs-dashboard/internal/hub"
 	"github.com/percona/obs-dashboard/internal/metricsampler"
+	"github.com/percona/obs-dashboard/internal/model"
 	"github.com/percona/obs-dashboard/internal/mq"
 	"github.com/percona/obs-dashboard/internal/obs"
 	"github.com/percona/obs-dashboard/internal/presence"
+	"github.com/percona/obs-dashboard/internal/release"
 	"github.com/percona/obs-dashboard/internal/store"
 	"github.com/percona/obs-dashboard/internal/telemetry"
 	"github.com/percona/obs-dashboard/internal/unblocker"
@@ -200,7 +202,19 @@ func run() error {
 	}
 	go reporter.Run(ctx)
 
-	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg, scanner)
+	// rel stays a nil interface when the feature is off (a nil *Service in
+	// the interface would look enabled).
+	var rel api.ReleaseService
+	if cfg.Release.Enabled() {
+		rel = release.NewService(release.Options{
+			GitHub:   &release.Client{Repo: cfg.Release.GitHubRepo, Token: cfg.Release.GitHubToken},
+			DB:       db,
+			Packages: packageSource{db},
+		})
+		slog.Info("release: enabled", "repo", cfg.Release.GitHubRepo)
+	}
+
+	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg, scanner, rel)
 
 	go fleet.RunHealthWatch(ctx, 15*time.Second, func(slug string, health obs.Health) {
 		h.Notify(hub.InstanceHealth(map[string]any{"slug": slug, "health": health}))
@@ -246,4 +260,11 @@ func runPruner(ctx context.Context, db *sql.DB, interval, eventRetention, metric
 			}
 		}
 	}
+}
+
+// packageSource adapts the store to release.PackageSource.
+type packageSource struct{ db *sql.DB }
+
+func (p packageSource) Packages(prefix string) ([]*model.Package, error) {
+	return store.QueryPackages(p.db, prefix)
 }

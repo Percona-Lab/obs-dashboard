@@ -44,7 +44,7 @@ type CveRescanner interface {
 
 // NewRouter creates the chi router with all API routes registered. authSvc
 // gates state-changing routes; reads stay public.
-func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager, rescan CveRescanner) http.Handler {
+func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager, rescan CveRescanner, rel ReleaseService) http.Handler {
 	r := chi.NewRouter()
 	r.Use(stripCallbackQuery)
 	r.Use(middleware.Logger)
@@ -116,6 +116,16 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 			r.With(authSvc.CheckOrigin).Post("/api/upgrades/{version}/apply", upgradesApplyHandler(upg))
 		})
 	}
+
+	// Release tab: always signed-in. Status is registered even when the
+	// feature is off so the frontend can hide the tab.
+	r.Group(func(r chi.Router) {
+		r.Use(authSvc.RequireUser)
+		r.Get("/api/release/status", releaseStatusHandler(rel != nil))
+		if rel != nil {
+			mountRelease(r, rel, authSvc.CheckOrigin)
+		}
+	})
 	return r
 }
 
