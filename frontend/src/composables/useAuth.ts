@@ -75,10 +75,10 @@ export function handleUnauthorized(): void {
   user.value = null
 }
 
-// guardSettingsTab keeps signed-out visitors off the Settings tab.
+// guardSettingsTab keeps signed-out visitors off the Settings and Release tabs.
 export function guardSettingsTab(mainTab: Ref<MainTab>): void {
   watch([mainTab, signedIn, loaded], () => {
-    if (loaded.value && !signedIn.value && mainTab.value === 'settings') mainTab.value = 'overview'
+    if (loaded.value && !signedIn.value && (mainTab.value === 'settings' || mainTab.value === 'release')) mainTab.value = 'overview'
   }, { immediate: true })
 }
 

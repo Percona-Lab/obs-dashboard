@@ -99,4 +99,13 @@ describe('useAuth', () => {
     await nextTick()
     expect(tab.value).toBe('settings')
   })
+
+  it('guardSettingsTab sends signed-out visitors off the release tab', async () => {
+    const tab = ref<MainTab>('release')
+    guardSettingsTab(tab)
+    stubFetch(() => json({ email: null, auth_enabled: true }))
+    await loadAuth()
+    await nextTick()
+    expect(tab.value).toBe('overview')
+  })
 })
