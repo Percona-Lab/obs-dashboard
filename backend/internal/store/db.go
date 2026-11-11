@@ -124,6 +124,18 @@ CREATE TABLE IF NOT EXISTS upgrades (
     finished_at   TEXT,
     error         TEXT
 );
+
+CREATE TABLE IF NOT EXISTS release_audit (
+    id     INTEGER PRIMARY KEY,
+    at     TEXT    NOT NULL,
+    email  TEXT    NOT NULL,
+    action TEXT    NOT NULL,
+    branch TEXT    NOT NULL,
+    pr     INTEGER NOT NULL DEFAULT 0,
+    detail TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_release_audit_branch ON release_audit (branch);
 `
 
 // columnExists reports whether table has a column named col.
