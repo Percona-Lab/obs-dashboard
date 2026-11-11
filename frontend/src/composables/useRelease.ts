@@ -13,6 +13,10 @@ const enabled = ref(false)
 const snapshot = ref<Snapshot | null>(null)
 const units = ref<UnitRow[]>([])
 const unitsError = ref('')
+// True once the first attempt to load the unit list has finished, either way.
+const unitsLoaded = ref(false)
+// True when the latest refresh of the releases failed.
+const loadFailed = ref(false)
 const notice = ref('')
 const busy = ref(false)
 
@@ -48,14 +52,16 @@ function doRefresh(fresh = false): Promise<void> {
     try {
       const res = await fetch(`${BASE}/releases`)
       if (res.status === 401) { handleUnauthorized(); return }
-      if (!res.ok) return
+      if (!res.ok) { if (mine === refreshSeq) loadFailed.value = true; return }
       const next = (await res.json()) as Snapshot
       if (mine === refreshSeq) {
+        loadFailed.value = false
         snapshot.value = next
         pruneDrafts(next.releases ?? [])
       }
     } catch {
       // Keep the last snapshot; the next poll retries.
+      if (mine === refreshSeq) loadFailed.value = true
     } finally {
       if (mine === refreshSeq) refreshing = null
     }
@@ -73,6 +79,8 @@ async function loadUnits(): Promise<void> {
     unitsError.value = ''
   } catch {
     unitsError.value = 'Network error'
+  } finally {
+    unitsLoaded.value = true
   }
 }
 
@@ -172,13 +180,15 @@ export function resetReleaseForTests(): void {
   snapshot.value = null
   units.value = []
   unitsError.value = ''
+  unitsLoaded.value = false
+  loadFailed.value = false
   notice.value = ''
   busy.value = false
 }
 
 export function useRelease() {
   return {
-    enabled, snapshot, units, unitsError, notice, busy,
+    enabled, snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy,
     loadStatus, refresh: () => doRefresh(), loadUnits,
     start, stopPolling,
     cut, saveChangelog, resetChangelog, act, loadHistory,

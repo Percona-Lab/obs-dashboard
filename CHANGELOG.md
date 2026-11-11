@@ -11,6 +11,11 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Loading indicators on the Release tab while the releases, the release units
+  and the history are being fetched, and a message when the first load fails.
+
 ### Fixed
 
 - Release tab listing already-finished merged release PRs as releases in progress.

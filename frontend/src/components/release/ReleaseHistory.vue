@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import { parseChangelog, segments, type PreviewNode } from '../../lib/changelogPreview'
 import { safeHref } from '../../lib/safeHref'
+import ReleaseLoading from './ReleaseLoading.vue'
 import type { HistoryRow } from '../../types/release'
 
 const { loadHistory } = useRelease()
@@ -42,7 +43,8 @@ const segs = (n: PreviewNode) => segments(n).map((s, id) => ({ ...s, id }))
       <span>Could not load the release history.</span>
       <button data-testid="history-retry" type="button" class="cursor-pointer rounded-[8px] border border-border-strong bg-bg-card px-3 py-[4px] text-[12px] font-semibold text-text-secondary" :disabled="loading" @click="loadNext">Retry</button>
     </div>
-    <div v-else-if="!rows.length && !loading" class="text-[13px] text-text-muted">No finished releases yet.</div>
+    <ReleaseLoading v-else-if="!rows.length && loading">Loading history…</ReleaseLoading>
+    <div v-else-if="!rows.length" class="text-[13px] text-text-muted">No finished releases yet.</div>
     <div
       v-for="r in rows"
       :key="r.tag"

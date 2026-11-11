@@ -4,11 +4,12 @@ import { useRelease } from '../../composables/useRelease'
 import ReleaseUnitList from './ReleaseUnitList.vue'
 import ReleaseHistory from './ReleaseHistory.vue'
 import ReleaseWizard from './ReleaseWizard.vue'
+import ReleaseLoading from './ReleaseLoading.vue'
 import { safeHref } from '../../lib/safeHref'
 import type { ReleaseState, ReleaseStep } from '../../types/release'
 
 const emit = defineEmits<{ 'open-builds': [] }>()
-const { snapshot, units, unitsError, notice, busy, loadUnits, cut } = useRelease()
+const { snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy, loadUnits, cut } = useRelease()
 
 const selectedId = ref<string | null>(null)
 
@@ -97,7 +98,9 @@ const when = (iso: string | null) => {
     <template v-else>
       <section data-testid="in-flight" class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">In flight</h3>
-        <div v-if="!releases.length" data-testid="release-in-flight" class="text-text-muted">No releases in flight.</div>
+        <ReleaseLoading v-if="!snapshot && !loadFailed">Loading releases from GitHub…</ReleaseLoading>
+        <div v-else-if="!snapshot" data-testid="release-load-error" class="rounded-[10px] border border-fail bg-fail-tint px-3 py-2 text-fail">Could not load the releases. Retrying…</div>
+        <div v-else-if="!releases.length" data-testid="release-in-flight" class="text-text-muted">No releases in flight.</div>
         <ul v-else data-testid="release-in-flight" class="m-0 flex list-none flex-col gap-[6px] p-0">
           <li v-for="r in releases" :key="r.id" :data-release="r.id" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-border px-3 py-[10px]">
             <button type="button" data-testid="open-in-flight" class="cursor-pointer border-0 bg-transparent p-0 font-mono text-[13px] font-semibold text-brand-purple" @click="selectedId = r.id">
@@ -110,12 +113,13 @@ const when = (iso: string | null) => {
         </ul>
       </section>
 
-      <section class="rounded-[14px] border border-border bg-bg-card p-5">
+      <section data-testid="new-release" class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">New release</h3>
-        <ReleaseUnitList :units="units" :busy="busy" :error="unitsError" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
+        <ReleaseLoading v-if="!unitsLoaded">Loading release units…</ReleaseLoading>
+        <ReleaseUnitList v-else :units="units" :busy="busy" :error="unitsError" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
       </section>
 
-      <section class="rounded-[14px] border border-border bg-bg-card p-5">
+      <section data-testid="history" class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">History</h3>
         <ReleaseHistory />
       </section>
