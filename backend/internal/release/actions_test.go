@@ -599,3 +599,74 @@ func TestActionNeverSendsEmail(t *testing.T) {
 	must(fx.svc.Abandon(ctx, actor, id, testHead))
 	check(fx)
 }
+
+func TestActionCutRefusedOnStaleSnapshot(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBuiltUnits()
+	if _, err := fx.svc.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fx.gh.setErr(errors.New("github unreachable"))
+	_, err := fx.svc.Cut(context.Background(), actor, []string{"ppg:staging:18"})
+	if err == nil {
+		t.Fatal("Cut succeeded on stale data")
+	}
+	if n := len(fx.gh.callsOf("Dispatch")); n != 0 {
+		t.Errorf("Dispatch called %d times", n)
+	}
+	m, aerr := store.ReleaseAuditByBranch(fx.db, []string{BranchPrefix + "20261111T150000"})
+	if aerr != nil {
+		t.Fatal(aerr)
+	}
+	for b, rows := range m {
+		if len(rows) != 0 {
+			t.Errorf("audit rows for %s: %+v", b, rows)
+		}
+	}
+}
+
+func TestActionCutTwiceQuickly(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBuiltUnits()
+	if _, err := fx.svc.Cut(context.Background(), actor, []string{"ppg:staging:18"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := fx.svc.Cut(context.Background(), actor, []string{"ppg:staging:18"})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("second Cut err = %v, want ErrConflict", err)
+	}
+	if n := len(fx.gh.callsOf("Dispatch")); n != 1 {
+		t.Errorf("Dispatch called %d times, want 1", n)
+	}
+}
+
+func TestActionCutBranchNamesUnique(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBuiltUnits()
+	a, err := fx.svc.Cut(context.Background(), actor, []string{"ppg:staging:18"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := fx.svc.Cut(context.Background(), actor, []string{"ppg:staging:17:extras"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Errorf("both cuts got branch id %q", a)
+	}
+	if n := len(fx.gh.callsOf("Dispatch")); n != 2 {
+		t.Errorf("Dispatch called %d times, want 2", n)
+	}
+}
+
+func TestActionAbandonRefusedWhileCutRunning(t *testing.T) {
+	for _, status := range []string{"queued", "in_progress"} {
+		fx := newFixture(t)
+		fx.withBranch()
+		fx.withCutRun(status, "")
+		if err := fx.svc.Abandon(context.Background(), actor, "20261111T143210", testHead); !errors.Is(err, ErrConflict) {
+			t.Fatalf("%s: err = %v", status, err)
+		}
+		fx.wantNoWrites(t)
+	}
+}
