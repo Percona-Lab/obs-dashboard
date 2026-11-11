@@ -66,6 +66,14 @@ describe('ReleaseWizard', () => {
     expect(act).toHaveBeenCalledWith('r1', 'abandon', 'abc')
   })
 
+  it('abandon uses the head shown when the dialog opens', async () => {
+    const w = mountW()
+    await w.get('[data-testid="abandon"]').trigger('click')
+    await w.setProps({ release: rel({ head_sha: 'moved' }) })
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'abandon', 'abc')
+  })
+
   it('escape cancels the dialog', async () => {
     const w = mountW()
     await w.get('[data-testid="abandon"]').trigger('click')

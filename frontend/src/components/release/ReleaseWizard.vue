@@ -25,7 +25,9 @@ const showRetry = computed(() => canAct.value && !handMade.value && cutFailed.va
 const readOnly = computed(() => ['sync', 'qa', 'releasing'].includes(props.release.step))
 const label = computed(() => props.release.units.length ? props.release.units.map((u) => u.release_id).join(' · ') : props.release.id)
 
-const dialog = ref<'abandon' | 'recut' | null>(null)
+// The dialog pins the release id and head the user was looking at when it opened.
+const dialog = ref<{ kind: 'abandon' | 'recut'; id: string; head: string } | null>(null)
+const openDialog = (kind: 'abandon' | 'recut') => { dialog.value = { kind, id: props.release.id, head: props.release.head_sha } }
 
 function ago(iso: string | null): string {
   const t = iso ? new Date(iso).getTime() : NaN
@@ -40,10 +42,11 @@ function ago(iso: string | null): string {
 async function confirm() {
   const d = dialog.value
   dialog.value = null
-  if (d === 'abandon') {
-    if (await act(props.release.id, 'abandon', props.release.head_sha)) emit('back')
-  } else if (d === 'recut') {
-    await act(props.release.id, 'recut', props.release.head_sha)
+  if (!d) return
+  if (d.kind === 'abandon') {
+    if (await act(d.id, 'abandon', d.head)) emit('back')
+  } else {
+    await act(d.id, 'recut', d.head)
   }
 }
 const retrySync = () => act(props.release.id, 'retry-sync', props.release.head_sha)
@@ -76,12 +79,12 @@ const progress = computed<Line[]>(() => {
     <div data-testid="release-strip" class="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border px-3 py-[10px]">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
         <b class="font-mono text-text-primary">{{ label }}</b>
-        <a v-if="release.pr && release.pr_url" :href="release.pr_url" target="_blank" rel="noopener noreferrer" class="text-brand-purple">PR #{{ release.pr }}</a>
+        <a v-if="release.pr && safeHref(release.pr_url)" :href="safeHref(release.pr_url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">PR #{{ release.pr }}</a>
         <small class="text-text-muted">started by {{ release.started_by || 'unknown' }}<template v-if="ago(release.started_at)"> · {{ ago(release.started_at) }}</template></small>
       </div>
       <div class="flex gap-2">
-        <button v-if="showRecut" type="button" data-testid="recut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="dialog = 'recut'">Update to latest main &amp; restart</button>
-        <button v-if="showAbandon" type="button" data-testid="abandon" :disabled="busy" class="cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:opacity-50" @click="dialog = 'abandon'">Abandon release</button>
+        <button v-if="showRecut" type="button" data-testid="recut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="openDialog('recut')">Update to latest main &amp; restart</button>
+        <button v-if="showAbandon" type="button" data-testid="abandon" :disabled="busy" class="cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:opacity-50" @click="openDialog('abandon')">Abandon release</button>
       </div>
     </div>
 
@@ -101,7 +104,7 @@ const progress = computed<Line[]>(() => {
       </div>
       <div v-if="cutFailed" data-testid="cut-failed" class="mt-3 flex flex-wrap items-center gap-3 text-fail">
         <b>The cut failed</b>
-        <a v-if="release.cut?.url" :href="release.cut.url" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run</a>
+        <a v-if="release.cut?.url && safeHref(release.cut.url)" :href="safeHref(release.cut.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run</a>
         <button v-if="showRetry" type="button" data-testid="retry-cut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retry">Retry</button>
       </div>
     </div>
@@ -145,7 +148,7 @@ const progress = computed<Line[]>(() => {
       </div>
     </template>
 
-    <ReleaseConfirm v-if="dialog === 'abandon'" title="Abandon this release?" body="The release PR will be closed and the release branch deleted. The units become selectable again." confirm-label="Abandon release" danger @confirm="confirm" @cancel="dialog = null" />
-    <ReleaseConfirm v-if="dialog === 'recut'" title="Update to latest main and restart?" body="The release is cut again on top of the latest main and all workflows re-run. Your changelog edits will be regenerated, so you edit and approve again." confirm-label="Update & restart" @confirm="confirm" @cancel="dialog = null" />
+    <ReleaseConfirm v-if="dialog?.kind === 'abandon'" title="Abandon this release?" body="The release PR will be closed and the release branch deleted. The units become selectable again." confirm-label="Abandon release" danger @confirm="confirm" @cancel="dialog = null" />
+    <ReleaseConfirm v-if="dialog?.kind === 'recut'" title="Update to latest main and restart?" body="The release is cut again on top of the latest main and all workflows re-run. Your changelog edits will be regenerated, so you edit and approve again." confirm-label="Update & restart" @confirm="confirm" @cancel="dialog = null" />
   </div>
 </template>

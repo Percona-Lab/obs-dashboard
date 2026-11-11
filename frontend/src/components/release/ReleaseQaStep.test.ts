@@ -63,6 +63,14 @@ describe('ReleaseQaStep', () => {
     expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', true)
   })
 
+  it('release uses the head shown when the dialog opened', async () => {
+    const w = mountQ({ state: 'finished', lanes: [lane({})] })
+    await w.get('[data-testid="release"]').trigger('click')
+    await w.setProps({ release: rel({ state: 'finished', lanes: [lane({})] }, { head_sha: 'moved' }) })
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', false)
+  })
+
   it('release without failures sends confirm_failed false', async () => {
     const w = mountQ({ state: 'finished', lanes: [lane({})] })
     await w.get('[data-testid="release"]').trigger('click')
