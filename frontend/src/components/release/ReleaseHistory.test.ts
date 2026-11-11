@@ -35,7 +35,7 @@ describe('ReleaseHistory', () => {
 
   it('loads more pages and expands notes', async () => {
     const page1 = Array.from({ length: 20 }, (_, i) => hr(i))
-    const f = vi.fn((url: string) => Promise.resolve(json({ rows: url.endsWith('page=1') ? page1 : [hr(99)] })))
+    const f = vi.fn((url: string) => Promise.resolve(json(url.endsWith('page=1') ? { rows: page1, more: true } : { rows: [hr(99)], more: false })))
     vi.stubGlobal('fetch', f)
     const w = mount(ReleaseHistory)
     await flushPromises()
@@ -65,7 +65,7 @@ describe('ReleaseHistory', () => {
     let fail = true
     const page1 = Array.from({ length: 20 }, (_, i) => hr(i))
     vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(
-      url.endsWith('page=1') ? json({ rows: page1 }) : fail ? new Response('x', { status: 500 }) : json({ rows: [hr(99)] }))))
+      url.endsWith('page=1') ? json({ rows: page1, more: true }) : fail ? new Response('x', { status: 500 }) : json({ rows: [hr(99)], more: false }))))
     const w = mount(ReleaseHistory)
     await flushPromises()
     await w.get('[data-testid="history-more"]').trigger('click')
@@ -77,5 +77,32 @@ describe('ReleaseHistory', () => {
     await flushPromises()
     expect(w.findAll('[data-testid="history-row"]')).toHaveLength(21)
     expect(w.find('[data-testid="history-more-error"]').exists()).toBe(false)
+  })
+
+  it('Load more follows the server, not the number of rows on a page', async () => {
+    // page 1: one row, more to come; page 2: no row at all, more to come; page 3: the last row
+    const pages: Record<string, unknown> = {
+      1: { rows: [hr(1)], more: true }, 2: { rows: [], more: true }, 3: { rows: [hr(3)], more: false },
+    }
+    const f = vi.fn((url: string) => Promise.resolve(json(pages[url.split('page=')[1]])))
+    vi.stubGlobal('fetch', f)
+    const w = mount(ReleaseHistory)
+    await flushPromises()
+    expect(w.findAll('[data-testid="history-row"]')).toHaveLength(1)
+    await w.get('[data-testid="history-more"]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-testid="history-row"]')).toHaveLength(1)
+    await w.get('[data-testid="history-more"]').trigger('click')
+    await flushPromises()
+    expect(f.mock.calls.map((c) => c[0])).toEqual(['/api/release/history?page=1', '/api/release/history?page=2', '/api/release/history?page=3'])
+    expect(w.findAll('[data-testid="history-row"]')).toHaveLength(2)
+    expect(w.find('[data-testid="history-more"]').exists()).toBe(false)
+  })
+
+  it('a full page with nothing after it shows no Load more', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ rows: Array.from({ length: 20 }, (_, i) => hr(i)), more: false }))))
+    const w = mount(ReleaseHistory)
+    await flushPromises()
+    expect(w.find('[data-testid="history-more"]').exists()).toBe(false)
   })
 })

@@ -7,6 +7,7 @@ import ReleaseWizard from './ReleaseWizard.vue'
 import { safeHref } from '../../lib/safeHref'
 import type { ReleaseState, ReleaseStep } from '../../types/release'
 
+const emit = defineEmits<{ 'open-builds': [] }>()
 const { snapshot, units, unitsError, notice, busy, loadUnits, cut } = useRelease()
 
 const selectedId = ref<string | null>(null)
@@ -111,7 +112,7 @@ const when = (iso: string | null) => {
 
       <section class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">New release</h3>
-        <ReleaseUnitList :units="units" :busy="busy" :error="unitsError" @cut="onCut" @open="openRelease" />
+        <ReleaseUnitList :units="units" :busy="busy" :error="unitsError" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
       </section>
 
       <section class="rounded-[14px] border border-border bg-bg-card p-5">

@@ -7,6 +7,7 @@ import ReleaseQaStep from './ReleaseQaStep.vue'
 import ReleaseRemovals from './ReleaseRemovals.vue'
 import ReleaseRunCards from './ReleaseRunCards.vue'
 import { safeHref } from '../../lib/safeHref'
+import { hasDrafts } from '../../composables/useChangelogDrafts'
 import type { ReleaseState } from '../../types/release'
 
 const props = defineProps<{ release: ReleaseState }>()
@@ -18,11 +19,25 @@ const stepIndex = computed(() => ({ cutting: 1, changelog: 1, sync: 2, qa: 3, re
 const handMade = computed(() => props.release.id.startsWith('pr-'))
 const canAct = computed(() => props.release.dashboard)
 const cutRunning = computed(() => props.release.cut?.state === 'queued' || props.release.cut?.state === 'running')
-const cutFailed = computed(() => props.release.step === 'cutting' && props.release.cut?.state === 'failure')
-const showAbandon = computed(() => canAct.value && props.release.step !== 'releasing' && !(props.release.step === 'cutting' && cutRunning.value))
+// A failed first cut is shown at step cutting; a failed re-cut leaves the PR as it was, at step changelog.
+const cutFailed = computed(() => (props.release.step === 'cutting' || props.release.step === 'changelog') && props.release.cut?.state === 'failure')
+// A first cut that failed left no branch and no PR: there is nothing to abandon.
+const nothingToAbandon = computed(() => !props.release.pr && !props.release.head_sha && props.release.cut?.state === 'failure')
+const showAbandon = computed(() => canAct.value && props.release.step !== 'releasing' && !(props.release.step === 'cutting' && cutRunning.value) && !nothingToAbandon.value)
 const showRecut = computed(() => canAct.value && !handMade.value && (props.release.step === 'sync' || props.release.step === 'qa'))
 const showRetry = computed(() => canAct.value && !handMade.value && cutFailed.value)
 const readOnly = computed(() => ['sync', 'qa', 'releasing'].includes(props.release.step))
+// Unsaved changelog text outlives the changelog step (see useChangelogDrafts).
+const draftsKept = computed(() => props.release.step !== 'changelog' && hasDrafts(props.release.id))
+const ACTION_WORDS: Record<string, string> = {
+  cut: 'started the release', save_changelog: 'edited the changelog', approve_changelog: 'approved the changelog',
+  retry_sync: 'retried the sync', approve_qa: 'approved the QA run', retry_qa: 'retried QA', recut: 'updated to latest main',
+  release: 'released', retry_release: 'retried the final sync', abandon: 'abandoned',
+}
+const when = (iso: string) => {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
+}
 const label = computed(() => props.release.units.length ? props.release.units.map((u) => u.release_id).join(' · ') : props.release.id)
 
 // The dialog pins the release id and head the user was looking at when it opened.
@@ -88,6 +103,15 @@ const progress = computed<Line[]>(() => {
       </div>
     </div>
 
+    <ul v-if="release.actions.length" data-testid="release-activity" aria-label="Activity" class="m-0 flex list-none flex-col gap-[2px] rounded-[10px] border border-border px-3 py-2 text-[12px] text-text-muted">
+      <li v-for="(a, i) in release.actions" :key="i" class="flex flex-wrap gap-x-2">
+        <span class="font-mono">{{ when(a.at) }}</span>
+        <span><span class="text-text-secondary">{{ a.email || 'unknown' }}</span> {{ ACTION_WORDS[a.action] ?? a.action }}</span>
+      </li>
+    </ul>
+
+    <div v-if="draftsKept" data-testid="drafts-kept" class="rounded-[10px] border border-warn bg-warn-tint px-3 py-2 text-text-primary">This release moved to another step. Your unsaved changelog text is kept and shown if the release returns to the changelog step.</div>
+
     <div v-if="!canAct" data-testid="fork-note" class="rounded-[10px] border border-warn bg-warn-tint px-3 py-2 text-text-primary">
       This release PR comes from a fork, so the dashboard cannot change it. Manage it on GitHub.
     </div>
@@ -109,7 +133,17 @@ const progress = computed<Line[]>(() => {
       </div>
     </div>
 
-    <ReleaseChangelogStep v-else-if="release.step === 'changelog'" :release="release" />
+    <template v-else-if="release.step === 'changelog'">
+      <div v-if="cutFailed" data-testid="cut-failed" class="flex flex-col gap-2 rounded-[10px] border border-fail p-3">
+        <div class="flex flex-wrap items-center gap-3 text-fail">
+          <b>The cut failed</b>
+          <a v-if="release.cut?.url && safeHref(release.cut.url)" :href="safeHref(release.cut.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run</a>
+          <button v-if="showRetry" type="button" data-testid="retry-cut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retry">Retry</button>
+        </div>
+        <small class="text-text-muted">The release was not updated. The changelog below is the one from before and cannot be edited or approved until a cut succeeds.</small>
+      </div>
+      <ReleaseChangelogStep :release="release" />
+    </template>
 
     <template v-else>
       <details v-if="readOnly" data-testid="changelog-readonly" class="rounded-[10px] border border-border px-3 py-2">
@@ -121,7 +155,10 @@ const progress = computed<Line[]>(() => {
       </details>
       <div v-if="release.step === 'sync'" data-testid="sync-step" class="flex flex-col gap-3">
         <template v-if="!release.sync.length">
-          <div v-if="release.sync_state === 'failure'" data-testid="sync-failed" class="rounded-[10px] border border-fail p-3 text-fail">The pre-release sync failed before any instance reported. Open the run on GitHub for details.</div>
+          <div v-if="release.sync_state === 'failure'" data-testid="sync-failed" class="flex flex-wrap items-center gap-3 rounded-[10px] border border-fail p-3 text-fail">
+            <span>The pre-release sync failed before any instance reported.</span>
+            <a v-if="safeHref(release.sync_url)" :href="safeHref(release.sync_url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
+          </div>
           <div v-else-if="release.sync_state === 'running'" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">The sync is starting…</div>
           <div v-else-if="release.sync_state === 'queued' || !release.sync_state" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">Waiting for the sync to start</div>
         </template>

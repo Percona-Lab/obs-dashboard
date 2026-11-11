@@ -62,9 +62,11 @@ export interface ReleaseState {
   units: UnitState[]
   cut: { state: RunState; url: string } | null
   sync_state: string
+  sync_url: string // the run the sync state was read from; '' while none
   sync: InstanceCard[]
   removals: { project: string; item: string }[]
-  qa: { state: 'waiting' | 'running' | 'finished'; lanes: Lane[] } | null
+  // url: the QA run ('' while none). error: why QA could not run, set with state 'failure'.
+  qa: { state: 'waiting' | 'running' | 'finished' | 'failure'; lanes: Lane[]; url: string; error: string } | null
   final: {
     tags: string[]
     instances: InstanceCard[]
@@ -97,5 +99,10 @@ export interface HistoryRow {
   failed_lanes: string[]
 }
 
+export interface HistoryPage {
+  rows: HistoryRow[]
+  more: boolean // a further page may exist, whatever the number of rows on this one
+}
+
 export type ReleaseAction =
-  | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'
+  | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'retry-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'

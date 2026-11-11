@@ -310,7 +310,7 @@ watch(selectedContext, () => refresh())
         :overview-window="overviewWindow"
         @update:overview-window="overviewWindow = $event"
       />
-      <ReleasePanel v-else-if="mainTab === 'release' && signedIn" />
+      <ReleasePanel v-else-if="mainTab === 'release' && signedIn" @open-builds="mainTab = 'board'" />
       <SettingsPanel v-else-if="mainTab === 'settings' && signedIn" />
     </div>
   </div>

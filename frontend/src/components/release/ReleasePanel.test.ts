@@ -9,7 +9,7 @@ import type { ReleaseState, Snapshot } from '../../types/release'
 const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
   id: 'r1', branch: 'release/r1', pr: 412, pr_url: 'https://github.com/o/r/pull/412', head_sha: 'abc', step: 'qa',
   dashboard: true, units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '17.10-2', tag: '', changelog: '', generated: null }],
-  cut: null, sync_state: '', sync: [], removals: [], qa: null, final: null,
+  cut: null, sync_state: '', sync_url: '', sync: [], removals: [], qa: null, final: null,
   started_by: '', started_at: null, actions: [], ...o,
 })
 const snap = (releases: ReleaseState[], o: Partial<Snapshot> = {}): Snapshot => ({ releases, stale: false, error: '', refreshed_at: '', ...o })
@@ -106,5 +106,15 @@ describe('ReleasePanel', () => {
       expect(w.find('[data-testid="release-starting"]').exists()).toBe(false)
       expect(useRelease().notice.value).toBe('The cut did not start. Check the Actions tab of the repository.')
     } finally { vi.useRealTimers() }
+  })
+
+  it('passes Open in Builds on to the app', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(json(url.includes('/history') ? { rows: [], more: false }
+      : { units: [{ unit: 'ppg:staging:18', members: [], release_project: '', release_dir: '', last_release: '', built: 0, total: 1, tickable: false, blocked: { reason: 'not_built', text: 'Not fully built', packages: ['pg'] } }] }))))
+    useRelease().snapshot.value = snap([])
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    await w.get('[data-testid="open-builds"]').trigger('click')
+    expect(w.emitted('open-builds')).toHaveLength(1)
   })
 })

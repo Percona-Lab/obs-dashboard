@@ -1,7 +1,8 @@
 import { ref, watch, type Ref, type WatchStopHandle } from 'vue'
 import { handleUnauthorized } from './useAuth'
 import { errorText } from './http'
-import type { HistoryRow, ReleaseAction, Snapshot, UnitRow } from '../types/release'
+import { pruneDrafts } from './useChangelogDrafts'
+import type { HistoryPage, ReleaseAction, Snapshot, UnitRow } from '../types/release'
 
 export const RELEASE_POLL_MS = 15_000
 const CONFLICT_NOTICE = 'This release changed. The view has been refreshed.'
@@ -49,7 +50,10 @@ function doRefresh(fresh = false): Promise<void> {
       if (res.status === 401) { handleUnauthorized(); return }
       if (!res.ok) return
       const next = (await res.json()) as Snapshot
-      if (mine === refreshSeq) snapshot.value = next
+      if (mine === refreshSeq) {
+        snapshot.value = next
+        pruneDrafts(next.releases ?? [])
+      }
     } catch {
       // Keep the last snapshot; the next poll retries.
     } finally {
@@ -120,12 +124,13 @@ async function act(id: string, action: ReleaseAction, head: string, confirmFaile
 }
 
 // null on any failure, so callers can tell an error from an empty page.
-async function loadHistory(page: number): Promise<HistoryRow[] | null> {
+async function loadHistory(page: number): Promise<HistoryPage | null> {
   try {
     const res = await fetch(`${BASE}/history?page=${page}`)
     if (res.status === 401) { handleUnauthorized(); return null }
     if (!res.ok) return null
-    return ((await res.json()) as { rows: HistoryRow[] }).rows
+    const body = (await res.json()) as Partial<HistoryPage>
+    return { rows: body.rows ?? [], more: body.more === true }
   } catch {
     return null
   }

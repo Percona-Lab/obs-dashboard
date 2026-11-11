@@ -9,12 +9,14 @@ const act = vi.fn(() => Promise.resolve(true))
 vi.mock('../../composables/useRelease', () => ({ useRelease: () => ({ act, busy: ref(false) }) }))
 
 const lane = (o: Partial<Lane>): Lane => ({ name: 'l', unit: 'u', jenkins_url: '', url: 'https://github.com/j/1', state: 'success', ...o })
-const rel = (qa: ReleaseState['qa'], o: Partial<ReleaseState> = {}): ReleaseState => ({
+type QA = NonNullable<ReleaseState['qa']>
+type QAIn = Pick<QA, 'state' | 'lanes'> & Partial<QA>
+const rel = (qaIn: QAIn, o: Partial<ReleaseState> = {}): ReleaseState => { const qa: QA = { url: '', error: '', ...qaIn }; return {
   id: 'r1', branch: 'b', pr: 5, pr_url: '', head_sha: 'abc', step: 'qa', dashboard: true,
   units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '18.6-6', tag: '', changelog: '', generated: null }],
-  cut: null, sync_state: 'success', sync: [], removals: [], qa, final: null, started_by: '', started_at: null, actions: [], ...o,
-})
-const mountQ = (qa: ReleaseState['qa'], o: Partial<ReleaseState> = {}) => mount(ReleaseQaStep, { props: { release: rel(qa, o) }, attachTo: document.body })
+  cut: null, sync_state: 'success', sync_url: '', sync: [], removals: [], qa, final: null, started_by: '', started_at: null, actions: [], ...o,
+} }
+const mountQ = (qa: QAIn, o: Partial<ReleaseState> = {}) => mount(ReleaseQaStep, { props: { release: rel(qa, o) }, attachTo: document.body })
 
 beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
 
@@ -105,5 +107,24 @@ describe('ReleaseQaStep', () => {
     expect(w.get('[data-testid="confirm-ok"]').text()).toBe('Release anyway')
     await w.get('[data-testid="confirm-ok"]').trigger('click')
     expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', true)
+  })
+
+  it('says why QA could not start, links to the run and offers Retry QA', async () => {
+    const w = mountQ({ state: 'failure', lanes: [], url: 'https://github.com/o/r/actions/runs/11', error: 'QA could not start.' })
+    const box = w.get('[data-testid="qa-failed"]')
+    expect(box.text()).toContain('QA could not start.')
+    expect(box.get('a').attributes('href')).toBe('https://github.com/o/r/actions/runs/11')
+    expect(box.get('a').attributes('rel')).toBe('noopener noreferrer')
+    expect(w.get('[data-testid="release"]').attributes('disabled')).toBeDefined()
+    expect(w.find('[data-testid="approve-qa"]').exists()).toBe(false)
+    await w.get('[data-testid="retry-qa"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'retry-qa', 'abc')
+  })
+
+  it('a fork release gets no Retry QA', () => {
+    const w = mountQ({ state: 'failure', lanes: [], url: '', error: 'The download servers did not serve the pre-release in time.' }, { dashboard: false })
+    expect(w.get('[data-testid="qa-failed"]').text()).toContain('The download servers did not serve the pre-release in time.')
+    expect(w.find('[data-testid="qa-failed"] a').exists()).toBe(false)
+    expect(w.find('[data-testid="retry-qa"]').exists()).toBe(false)
   })
 })
