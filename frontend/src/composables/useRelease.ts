@@ -1,0 +1,167 @@
+import { ref, watch, type Ref, type WatchStopHandle } from 'vue'
+import { handleUnauthorized } from './useAuth'
+import { errorText } from './http'
+import type { HistoryRow, ReleaseAction, Snapshot, UnitRow } from '../types/release'
+
+export const RELEASE_POLL_MS = 15_000
+const CONFLICT_NOTICE = 'This release changed. The view has been refreshed.'
+const BASE = '/api/release'
+
+// Module-level singleton, like useAuth.
+const enabled = ref(false)
+const snapshot = ref<Snapshot | null>(null)
+const units = ref<UnitRow[]>([])
+const unitsError = ref('')
+const notice = ref('')
+const busy = ref(false)
+
+let timer: ReturnType<typeof setInterval> | undefined
+let stopWatch: WatchStopHandle | undefined
+let removeVisibility: (() => void) | undefined
+let refreshing: Promise<void> | null = null
+
+async function loadStatus(): Promise<void> {
+  try {
+    const res = await fetch(`${BASE}/status`)
+    if (res.status === 401) handleUnauthorized()
+    enabled.value = res.ok && ((await res.json()) as { enabled?: boolean }).enabled === true
+  } catch {
+    enabled.value = false
+  }
+}
+
+function doRefresh(): Promise<void> {
+  // One request at a time: a refresh asked for mid-flight shares the running one.
+  refreshing ??= (async () => {
+    try {
+      const res = await fetch(`${BASE}/releases`)
+      if (res.status === 401) { handleUnauthorized(); return }
+      if (!res.ok) return
+      snapshot.value = (await res.json()) as Snapshot
+    } catch {
+      // Keep the last snapshot; the next poll retries.
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+async function loadUnits(): Promise<void> {
+  try {
+    const res = await fetch(`${BASE}/units`)
+    if (res.status === 401) { handleUnauthorized(); return }
+    if (!res.ok) { unitsError.value = await errorText(res); return }
+    units.value = ((await res.json()) as { units: UnitRow[] }).units
+    unitsError.value = ''
+  } catch {
+    unitsError.value = 'Network error'
+  }
+}
+
+// send performs a write, then always refreshes the snapshot. Returns the
+// response when it was ok, otherwise null with `notice` set.
+async function send(method: string, path: string, body: unknown): Promise<Response | null> {
+  busy.value = true
+  notice.value = ''
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.status === 401) handleUnauthorized()
+    if (!res.ok) {
+      notice.value = res.status === 409 ? CONFLICT_NOTICE : await errorText(res)
+    }
+    return res.ok ? res : null
+  } catch {
+    notice.value = 'Network error'
+    return null
+  } finally {
+    await doRefresh()
+    busy.value = false
+  }
+}
+
+async function cut(unitIDs: string[]): Promise<string | null> {
+  const res = await send('POST', '/releases', { units: unitIDs })
+  if (!res) return null
+  try {
+    return ((await res.json()) as { id: string }).id
+  } catch {
+    return null
+  }
+}
+
+async function saveChangelog(id: string, head: string, unit: string, section: string): Promise<boolean> {
+  return (await send('PUT', `/releases/${encodeURIComponent(id)}/changelog`, { head, unit, section })) !== null
+}
+
+async function resetChangelog(id: string, head: string, unit: string): Promise<boolean> {
+  return (await send('POST', `/releases/${encodeURIComponent(id)}/changelog/reset`, { head, unit })) !== null
+}
+
+async function act(id: string, action: ReleaseAction, head: string, confirmFailed = false): Promise<boolean> {
+  return (await send('POST', `/releases/${encodeURIComponent(id)}/${action}`, { head, confirm_failed: confirmFailed })) !== null
+}
+
+async function loadHistory(page: number): Promise<HistoryRow[]> {
+  try {
+    const res = await fetch(`${BASE}/history?page=${page}`)
+    if (res.status === 401) { handleUnauthorized(); return [] }
+    if (!res.ok) { notice.value = await errorText(res); return [] }
+    return ((await res.json()) as { rows: HistoryRow[] }).rows
+  } catch {
+    notice.value = 'Network error'
+    return []
+  }
+}
+
+function stop(): void {
+  if (timer !== undefined) clearInterval(timer)
+  timer = undefined
+}
+
+// start drives polling: every 15 s, only while `active` and the document is visible.
+function start(active: Ref<boolean>): void {
+  stopPolling()
+  const sync = () => {
+    stop()
+    if (!active.value || document.visibilityState !== 'visible') return
+    void doRefresh()
+    timer = setInterval(() => { void doRefresh() }, RELEASE_POLL_MS)
+  }
+  stopWatch = watch(active, sync)
+  document.addEventListener('visibilitychange', sync)
+  removeVisibility = () => document.removeEventListener('visibilitychange', sync)
+  sync()
+}
+
+function stopPolling(): void {
+  stop()
+  stopWatch?.()
+  stopWatch = undefined
+  removeVisibility?.()
+  removeVisibility = undefined
+}
+
+export function resetReleaseForTests(): void {
+  stopPolling()
+  refreshing = null
+  enabled.value = false
+  snapshot.value = null
+  units.value = []
+  unitsError.value = ''
+  notice.value = ''
+  busy.value = false
+}
+
+export function useRelease() {
+  return {
+    enabled, snapshot, units, unitsError, notice, busy,
+    loadStatus, refresh: doRefresh, loadUnits,
+    start, stopPolling,
+    cut, saveChangelog, resetChangelog, act, loadHistory,
+  }
+}

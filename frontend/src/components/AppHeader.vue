@@ -2,8 +2,10 @@
 import type { MainTab } from '../composables/useUrlState'
 import { useAuth, login, logout } from '../composables/useAuth'
 import { useUpgrades } from '../composables/useUpgrades'
+import { useRelease } from '../composables/useRelease'
 
 const { updateAvailable } = useUpgrades()
+const { enabled: releaseEnabled } = useRelease()
 
 defineProps<{
   theme: 'light' | 'dark'
@@ -50,6 +52,15 @@ async function onSignOut() {
         @click="emit('update:main-tab', 'artifacts')"
       >
         Artifacts
+      </button>
+      <button
+        v-if="signedIn && releaseEnabled"
+        data-testid="release-tab"
+        class="tab-pill"
+        :class="{ active: mainTab === 'release' }"
+        @click="emit('update:main-tab', 'release')"
+      >
+        Release
       </button>
       <button
         v-if="signedIn"

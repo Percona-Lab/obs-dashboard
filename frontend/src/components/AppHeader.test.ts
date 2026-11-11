@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import AppHeader from './AppHeader.vue'
 import { useAuth, resetAuthForTests } from '../composables/useAuth'
 import { useUpgrades, resetUpgradesForTests } from '../composables/useUpgrades'
+import { useRelease, resetReleaseForTests } from '../composables/useRelease'
 
 function mountHeader() {
   return mount(AppHeader, { props: { theme: 'light', mainTab: 'overview' } })
@@ -59,5 +60,21 @@ describe('AppHeader update dot', () => {
     useAuth().user.value = 'alice@percona.com'
     useUpgrades().view.value = v('applied')
     expect(mountHeader().find('[data-testid="update-dot"]').exists()).toBe(false)
+  })
+})
+
+describe('AppHeader release tab', () => {
+  beforeEach(() => resetReleaseForTests())
+  it('shows Release only when signed in and enabled', async () => {
+    useAuth().authEnabled.value = true
+    useRelease().enabled.value = true
+    expect(mountHeader().find('[data-testid="release-tab"]').exists()).toBe(false)
+    useAuth().user.value = 'alice@percona.com'
+    const w = mountHeader()
+    expect(w.find('[data-testid="release-tab"]').exists()).toBe(true)
+    await w.find('[data-testid="release-tab"]').trigger('click')
+    expect(w.emitted('update:main-tab')).toEqual([['release']])
+    useRelease().enabled.value = false
+    expect(mountHeader().find('[data-testid="release-tab"]').exists()).toBe(false)
   })
 })

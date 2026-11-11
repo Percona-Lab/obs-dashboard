@@ -7,6 +7,7 @@ import MainGrid from './components/MainGrid.vue'
 import ArtifactsPanel from './components/ArtifactsPanel.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import ReleasePanel from './components/release/ReleasePanel.vue'
 import HostUpdateBanner from './components/HostUpdateBanner.vue'
 import type { Context } from './types/api'
 import type { WindowKey } from './types/overview'
@@ -18,6 +19,7 @@ import { useRealtimeStream } from './composables/useRealtimeStream'
 import { useUrlState, type MainTab } from './composables/useUrlState'
 import { usePresenceHeartbeat } from './composables/usePresenceHeartbeat'
 import { startUpgradeNotices, stopUpgradeNotices } from './composables/useUpgrades'
+import { useRelease } from './composables/useRelease'
 import { useAuth, loadAuth, consumeAuthError, guardSettingsTab, dismissNotice } from './composables/useAuth'
 
 // Main tab (Overview is the default landing view)
@@ -31,10 +33,14 @@ usePresenceHeartbeat(computed(() => mainTab.value === 'board' || mainTab.value =
 // signed-out visitors off Settings.
 const { notice, signedIn } = useAuth()
 consumeAuthError()
+const release = useRelease()
 void loadAuth()
 guardSettingsTab(mainTab)
 // Upgrade notices (header dot, host-update banner) are for signed-in users.
 watch(signedIn, (on) => (on ? startUpgradeNotices() : stopUpgradeNotices()), { immediate: true })
+// The Release tab exists only when the backend feature is on; poll only while it is open.
+watch(signedIn, (on) => { if (on) void release.loadStatus(); else release.enabled.value = false }, { immediate: true })
+release.start(computed(() => mainTab.value === 'release' && signedIn.value))
 
 // Theme
 // Default to the OS color scheme; a manual toggle is remembered in
@@ -300,6 +306,7 @@ watch(selectedContext, () => refresh())
         :overview-window="overviewWindow"
         @update:overview-window="overviewWindow = $event"
       />
+      <ReleasePanel v-else-if="mainTab === 'release' && signedIn" />
       <SettingsPanel v-else-if="mainTab === 'settings' && signedIn" />
     </div>
   </div>
