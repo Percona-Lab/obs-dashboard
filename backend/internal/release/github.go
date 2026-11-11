@@ -22,6 +22,10 @@ import (
 var (
 	ErrNotFound = errors.New("github: not found")
 	ErrConflict = errors.New("github: conflict")
+	// ErrUnusable marks repository content that exists but is not a file the
+	// dashboard can read: a directory, a symlink, a submodule, or a file too
+	// large for GitHub to return inline.
+	ErrUnusable = errors.New("github: content is not a readable file")
 )
 
 // APIError is a failed GitHub call. It carries method, path (no query) and
@@ -54,6 +58,7 @@ type Ref struct{ Name, SHA string } // Name without refs/heads/
 
 type Run struct {
 	ID                                                              int64
+	Attempt                                                         int // a re-run keeps the id and counts up
 	Name, WorkflowFile, Event, HeadSHA, Status, Conclusion, HTMLURL string
 	CreatedAt                                                       time.Time
 }
@@ -107,6 +112,7 @@ type Client struct {
 
 	mu    sync.Mutex
 	cache map[string]cachedBody
+	tick  uint64 // counts cache uses, for eviction
 }
 
 var _ GitHub = (*Client)(nil)
@@ -115,6 +121,7 @@ type cachedBody struct {
 	etag string
 	link string // Link header of the original 200; a 304 may omit it
 	body []byte
+	used uint64 // Client.tick when last stored or served
 }
 
 const (
@@ -123,6 +130,7 @@ const (
 	maxArtifactFile = 4 << 20
 	maxArtifactZip  = 16 << 20
 	maxPages        = 50
+	maxCacheEntries = 500
 )
 
 func (c *Client) base() string {
@@ -189,6 +197,11 @@ func (c *Client) do(ctx context.Context, method, target string, body any, cache 
 	if resp.StatusCode == http.StatusNotModified && useCache {
 		c.mu.Lock()
 		e, ok := c.cache[full]
+		if ok {
+			c.tick++
+			e.used = c.tick
+			c.cache[full] = e
+		}
 		c.mu.Unlock()
 		if ok {
 			h := resp.Header.Clone()
@@ -211,11 +224,27 @@ func (c *Client) do(ctx context.Context, method, target string, body any, cache 
 			if c.cache == nil {
 				c.cache = map[string]cachedBody{}
 			}
-			c.cache[full] = cachedBody{etag: et, link: resp.Header.Get("Link"), body: data}
+			c.tick++
+			c.cache[full] = cachedBody{etag: et, link: resp.Header.Get("Link"), body: data, used: c.tick}
+			c.evictLocked()
 			c.mu.Unlock()
 		}
 	}
 	return resp.Header, data, nil
+}
+
+// evictLocked drops the least recently used entries beyond maxCacheEntries.
+// c.mu must be held.
+func (c *Client) evictLocked() {
+	for len(c.cache) > maxCacheEntries {
+		oldest, first := "", true
+		for k, e := range c.cache {
+			if first || e.used < c.cache[oldest].used {
+				oldest, first = k, false
+			}
+		}
+		delete(c.cache, oldest)
+	}
 }
 
 func (c *Client) getJSON(ctx context.Context, p string, out any) error {
@@ -490,20 +519,41 @@ func (c *Client) DeleteBranch(ctx context.Context, branch string) error {
 	return err
 }
 
+// File returns the content of the file at p in ref. What is there but is not
+// a file GitHub returns inline (a directory, a symlink, a submodule, a file
+// over 1 MB) is ErrUnusable.
 func (c *Client) File(ctx context.Context, p, ref string) ([]byte, error) {
+	_, data, err := c.do(ctx, http.MethodGet, c.repoPath("contents/"+escapePath(p)+"?ref="+url.QueryEscape(ref)), nil, true)
+	if err != nil {
+		return nil, err
+	}
+	unusable := func(why string) error {
+		return fmt.Errorf("github contents %s: %s: %w", p, why, ErrUnusable)
+	}
+	if len(data) > maxJSONBody {
+		return nil, unusable("response too large")
+	}
+	if trimmed := bytes.TrimLeft(data, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
+		return nil, unusable("is a directory")
+	}
 	var f struct {
+		Type     string `json:"type"`
 		Encoding string `json:"encoding"`
 		Content  string `json:"content"`
 	}
-	if err := c.getJSON(ctx, c.repoPath("contents/"+escapePath(p)+"?ref="+url.QueryEscape(ref)), &f); err != nil {
-		return nil, err
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("github GET %s: decode failed", c.repoPath("contents/"+p))
+	}
+	if f.Type != "" && f.Type != "file" {
+		return nil, unusable("is not a regular file")
 	}
 	if f.Encoding != "base64" {
-		return nil, fmt.Errorf("github contents %s: unsupported encoding", p)
+		// GitHub answers "none" with no content for files over 1 MB.
+		return nil, unusable("not returned inline")
 	}
 	b, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(f.Content, "\n", ""))
 	if err != nil {
-		return nil, fmt.Errorf("github contents %s: bad content", p)
+		return nil, unusable("bad content")
 	}
 	return b, nil
 }
@@ -607,6 +657,7 @@ type ghRun struct {
 	Conclusion   string    `json:"conclusion"`
 	HTMLURL      string    `json:"html_url"`
 	CreatedAt    time.Time `json:"created_at"`
+	RunAttempt   int       `json:"run_attempt"`
 }
 
 func (g ghRun) run() Run {
@@ -615,7 +666,7 @@ func (g ghRun) run() Run {
 		name = g.Name
 	}
 	return Run{
-		ID: g.ID, Name: name, WorkflowFile: path.Base(g.Path), Event: g.Event, HeadSHA: g.HeadSHA,
+		ID: g.ID, Attempt: g.RunAttempt, Name: name, WorkflowFile: path.Base(g.Path), Event: g.Event, HeadSHA: g.HeadSHA,
 		Status: g.Status, Conclusion: g.Conclusion, HTMLURL: g.HTMLURL, CreatedAt: g.CreatedAt,
 	}
 }

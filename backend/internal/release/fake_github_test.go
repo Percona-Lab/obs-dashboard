@@ -34,9 +34,10 @@ type fakeGitHub struct {
 
 	calls        []string
 	err          error
-	hasClosedErr error // returned by HasClosedPull only
-	deleteErr    error // returned by DeleteBranch only
-	closeErr     error // returned by ClosePull only
+	hasClosedErr error            // returned by HasClosedPull only
+	deleteErr    error            // returned by DeleteBranch only
+	closeErr     error            // returned by ClosePull only
+	fileErrs     map[string]error // "ref:path" -> error File returns for it
 	nextPR       int
 	block        chan struct{} // when non-nil, Branches waits for it to close
 	now          func() time.Time
@@ -54,6 +55,7 @@ func newFakeGitHub() *fakeGitHub {
 		tagSHAs:     map[string]string{},
 		commitPulls: map[string]Pull{},
 		closedHeads: map[string]bool{},
+		fileErrs:    map[string]error{},
 		nextPR:      500,
 		now:         time.Now,
 	}
@@ -320,6 +322,9 @@ func (f *fakeGitHub) File(ctx context.Context, path, ref string) ([]byte, error)
 	defer f.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if e := f.fileErrs[ref+":"+path]; e != nil {
+		return nil, e
 	}
 	b, ok := f.files[ref+":"+path]
 	if !ok {

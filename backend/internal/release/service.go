@@ -32,6 +32,209 @@ const (
 	auditRelease = "release"
 )
 
+// missingArtifactTTL is how long a finished run's missing artifact is not
+// asked for again.
+const missingArtifactTTL = 5 * time.Minute
+
+// factCache holds facts that never change once observed (the jobs of a
+// finished run, a file at a commit). It is bounded by use: an entry no
+// refresh round touched is dropped at the end of that round, so what belongs
+// to a release that left the snapshot goes with it. Service.cacheMu guards it.
+type factCache[K comparable, V any] struct {
+	m map[K]factEntry[V]
+}
+
+type factEntry[V any] struct {
+	v     V
+	round uint64 // refresh round that last used the entry
+}
+
+func (c *factCache[K, V]) get(k K, round uint64) (V, bool) {
+	e, ok := c.m[k]
+	if ok && e.round != round {
+		e.round = round
+		c.m[k] = e
+	}
+	return e.v, ok
+}
+
+func (c *factCache[K, V]) put(k K, v V, round uint64) {
+	if c.m == nil {
+		c.m = map[K]factEntry[V]{}
+	}
+	c.m[k] = factEntry[V]{v: v, round: round}
+}
+
+func (c *factCache[K, V]) prune(round uint64) {
+	for k, e := range c.m {
+		if e.round != round {
+			delete(c.m, k)
+		}
+	}
+}
+
+// cached and remember read and write a factCache under the service lock.
+func cached[K comparable, V any](s *Service, c *factCache[K, V], k K) (V, bool) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return c.get(k, s.round)
+}
+
+func remember[K comparable, V any](s *Service, c *factCache[K, V], k K, v V) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	c.put(k, v, s.round)
+}
+
+// runKey names one attempt of a run: a re-run keeps the id.
+type runKey struct {
+	id      int64
+	attempt int
+}
+
+type artifactKey struct {
+	run  runKey
+	name string
+}
+
+// artifact is the first file of a run's artifact, or the fact that the
+// finished run had none when last asked.
+type artifact struct {
+	data    []byte
+	missing bool
+	at      time.Time
+}
+
+type fileKey struct{ sha, path string }
+
+// commitFile is what a path holds at a commit: its content, or the reason it
+// cannot be read there (absent or unusable), which is just as final.
+type commitFile struct {
+	data []byte
+	err  error
+}
+
+// fileRef is where a file is read: a commit (whose content never changes and
+// is kept) or a branch.
+type fileRef struct {
+	name   string
+	commit bool
+}
+
+// pruneCaches ends a refresh round: what it did not use is dropped.
+func (s *Service) pruneCaches() {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.pullFiles.prune(s.round)
+	s.generated.prune(s.round)
+	s.reports.prune(s.round)
+	s.runJobs.prune(s.round)
+	s.jobAnnotations.prune(s.round)
+	s.artifacts.prune(s.round)
+	s.commitFiles.prune(s.round)
+	s.closedPulls.prune(s.round)
+}
+
+// cacheSize counts the entries of the per-release caches.
+func (s *Service) cacheSize() int {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return len(s.pullFiles.m) + len(s.generated.m) + len(s.reports.m) + len(s.runJobs.m) +
+		len(s.jobAnnotations.m) + len(s.artifacts.m) + len(s.commitFiles.m) + len(s.closedPulls.m)
+}
+
+// unusable reports whether err means the file is absent or cannot be read as
+// a file: the unit then degrades instead of failing the refresh.
+func unusable(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, ErrUnusable)
+}
+
+// jobsOf returns the jobs of run. Those of a finished run do not change and
+// are kept; a run in progress is always read again.
+func (s *Service) jobsOf(ctx context.Context, run Run) ([]Job, error) {
+	key := runKey{run.ID, run.Attempt}
+	done := run.Status == "completed"
+	if done {
+		if jobs, ok := cached(s, &s.runJobs, key); ok {
+			return jobs, nil
+		}
+	}
+	jobs, err := s.gh.Jobs(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
+		// The run list and the job list are two reads: keep only a settled one.
+		done = done && j.Status == "completed"
+	}
+	if done {
+		remember(s, &s.runJobs, key, jobs)
+	}
+	return jobs, nil
+}
+
+// annotationsOf returns the annotations of a job; those of a finished job
+// are kept.
+func (s *Service) annotationsOf(ctx context.Context, j Job) ([]Annotation, error) {
+	done := j.Status == "completed"
+	if done {
+		if anns, ok := cached(s, &s.jobAnnotations, j.ID); ok {
+			return anns, nil
+		}
+	}
+	anns, err := s.gh.Annotations(ctx, j.ID)
+	if err != nil {
+		return nil, err
+	}
+	if done {
+		remember(s, &s.jobAnnotations, j.ID, anns)
+	}
+	return anns, nil
+}
+
+// artifactOf returns the first file of the named artifact of run. For a
+// finished run the content is kept; a missing artifact is not asked for
+// again for missingArtifactTTL.
+func (s *Service) artifactOf(ctx context.Context, run Run, name string) ([]byte, error) {
+	key := artifactKey{runKey{run.ID, run.Attempt}, name}
+	done := run.Status == "completed"
+	if done {
+		if a, ok := cached(s, &s.artifacts, key); ok {
+			if !a.missing {
+				return a.data, nil
+			}
+			if s.now().Sub(a.at) < missingArtifactTTL {
+				return nil, fmt.Errorf("artifact %s of run %d: %w", name, run.ID, ErrNotFound)
+			}
+		}
+	}
+	data, err := s.gh.Artifact(ctx, run.ID, name)
+	switch {
+	case err == nil && done:
+		remember(s, &s.artifacts, key, artifact{data: data})
+	case errors.Is(err, ErrNotFound) && done:
+		remember(s, &s.artifacts, key, artifact{missing: true, at: s.now()})
+	}
+	return data, err
+}
+
+// fileAt reads a file at ref. What a commit holds is kept, including that a
+// path is absent or unusable there; a failed call is not.
+func (s *Service) fileAt(ctx context.Context, p string, ref fileRef) ([]byte, error) {
+	if !ref.commit {
+		return s.gh.File(ctx, p, ref.name)
+	}
+	key := fileKey{ref.name, p}
+	if f, ok := cached(s, &s.commitFiles, key); ok {
+		return f.data, f.err
+	}
+	b, err := s.gh.File(ctx, p, ref.name)
+	if err == nil || unusable(err) {
+		remember(s, &s.commitFiles, key, commitFile{data: b, err: err})
+	}
+	return b, err
+}
+
 // errUnitsFile marks a units file that exists but cannot be used.
 var errUnitsFile = errors.New("release units file is invalid")
 
@@ -99,12 +302,19 @@ type Service struct {
 	mainGen uint64
 	mainOK  bool
 
-	// Facts that never change once observed.
-	cacheMu   sync.Mutex
-	pullFiles map[string][]string         // "<number>@<head sha>"
-	generated map[int64]map[string]string // successful cut run -> unit -> section
-	reports   map[int64]jobReport         // finished populate job
-	tagPulls  map[string]tagPull          // tag -> PR of the tagged commit
+	// Facts that never change once observed. Those of a release are dropped
+	// once no refresh uses them any more (see factCache).
+	cacheMu        sync.Mutex
+	round          uint64                              // refresh round, for factCache
+	pullFiles      factCache[string, []string]         // "<number>@<head sha>"
+	generated      factCache[int64, map[string]string] // successful cut run -> unit -> section
+	reports        factCache[int64, jobReport]         // finished populate job
+	runJobs        factCache[runKey, []Job]            // finished run
+	jobAnnotations factCache[int64, []Annotation]      // finished job
+	artifacts      factCache[artifactKey, artifact]    // finished run + artifact name
+	commitFiles    factCache[fileKey, commitFile]      // commit sha + path
+	closedPulls    factCache[string, struct{}]         // branch that has a closed PR
+	tagPulls       map[string]tagPull                  // tag -> PR of the tagged commit
 
 	// Cuts dispatched and not yet listed by GitHub, by branch. Also under
 	// cacheMu. Not release state: an entry lives two minutes at most.
@@ -140,10 +350,7 @@ type tagPull struct {
 func NewService(o Options) *Service {
 	s := &Service{
 		gh: o.GitHub, db: o.DB, pkgs: o.Packages, now: o.Now, ttl: o.TTL,
-		pullFiles: map[string][]string{},
-		generated: map[int64]map[string]string{},
-		reports:   map[int64]jobReport{},
-		tagPulls:  map[string]tagPull{},
+		tagPulls: map[string]tagPull{},
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -219,8 +426,11 @@ func (s *Service) runRefresh(ctx context.Context, c *refreshCall) {
 		s.good = Snapshot{Releases: releases, RefreshedAt: s.now().UTC()}
 		s.haveGood = true
 		s.lastErr = ""
-	} else if s.haveGood {
-		s.lastErr = err.Error()
+	} else {
+		slog.Warn("release: refresh failed", "err", err)
+		if s.haveGood {
+			s.lastErr = publicError(err)
+		}
 	}
 	if s.haveGood {
 		s.at = s.now()
@@ -231,6 +441,17 @@ func (s *Service) runRefresh(ctx context.Context, c *refreshCall) {
 	}
 	s.mu.Unlock()
 	close(c.done)
+}
+
+// publicError is the text of a refresh error that may be shown: a GitHub
+// call that failed says which (method, path, status); anything else is kept
+// to the log.
+func publicError(err error) string {
+	var ae *APIError
+	if errors.As(err, &ae) {
+		return ae.Error()
+	}
+	return "internal error"
 }
 
 // candidate is a release found in GitHub, before its details are read.
@@ -246,6 +467,9 @@ type candidate struct {
 // refresh reads every release in flight from GitHub.
 func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 	now := s.now()
+	s.cacheMu.Lock()
+	s.round++
+	s.cacheMu.Unlock()
 	branches, err := s.gh.Branches(ctx, BranchPrefix)
 	if err != nil {
 		return nil, err
@@ -323,9 +547,15 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 			claimed[b.Name] = true
 			// A branch whose PR was closed without merging is not a release,
 			// and gets no new PR.
-			closed, err := s.gh.HasClosedPull(ctx, b.Name)
-			if err != nil {
-				return nil, err
+			// A closed PR stays closed: only "none yet" is asked again.
+			_, closed := cached(s, &s.closedPulls, b.Name)
+			if !closed {
+				if closed, err = s.gh.HasClosedPull(ctx, b.Name); err != nil {
+					return nil, err
+				}
+				if closed {
+					remember(s, &s.closedPulls, b.Name, struct{}{})
+				}
 			}
 			if closed {
 				continue
@@ -388,6 +618,7 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 		return nil, err
 	}
 	sort.Slice(releases, func(i, j int) bool { return releases[i].ID < releases[j].ID })
+	s.pruneCaches()
 	return releases, nil
 }
 
@@ -395,26 +626,21 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 // given head never changes, so it is kept.
 func (s *Service) releaseFiles(ctx context.Context, p Pull) ([]string, error) {
 	key := fmt.Sprintf("%d@%s", p.Number, p.HeadSHA)
-	s.cacheMu.Lock()
-	paths, ok := s.pullFiles[key]
-	s.cacheMu.Unlock()
-	if ok {
+	if paths, ok := cached(s, &s.pullFiles, key); ok {
 		return paths, nil
 	}
 	files, err := s.gh.PullFiles(ctx, p.Number)
 	if err != nil {
 		return nil, err
 	}
-	paths = []string{}
+	paths := []string{}
 	for _, f := range files {
 		if releaseYAMLRe.MatchString(f) {
 			paths = append(paths, f)
 		}
 	}
 	sort.Strings(paths)
-	s.cacheMu.Lock()
-	s.pullFiles[key] = paths
-	s.cacheMu.Unlock()
+	remember(s, &s.pullFiles, key, paths)
 	return paths, nil
 }
 
@@ -438,7 +664,7 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 	if c.pull != nil {
 		rel.Units, err = s.pullUnits(ctx, c, generated)
 	} else if c.branchSHA != "" {
-		rel.Units, err = s.branchUnits(ctx, c.branch, generated)
+		rel.Units, err = s.branchUnits(ctx, c, generated)
 	}
 	if err != nil {
 		return rel, err
@@ -503,7 +729,7 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 			if r.WorkflowFile != WorkflowPR || r.HeadSHA != p.HeadSHA {
 				continue
 			}
-			if f.Jobs[r.ID], err = s.gh.Jobs(ctx, r.ID); err != nil {
+			if f.Jobs[r.ID], err = s.jobsOf(ctx, r); err != nil {
 				return err
 			}
 		}
@@ -519,7 +745,7 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 			if !ok || isSkipped(j) || j.Status != "completed" {
 				continue
 			}
-			rep := s.populateReport(ctx, syncRun.ID, j, inst)
+			rep := s.populateReport(ctx, *syncRun, j, inst)
 			for i := range cards {
 				if cards[i].Instance == inst {
 					cards[i].FailedUnits = append(cards[i].FailedUnits, rep.failedUnits...)
@@ -543,7 +769,7 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 					continue
 				}
 				// A lane without its Jenkins link falls back to the job page.
-				if anns, err := s.gh.Annotations(ctx, j.ID); err == nil {
+				if anns, err := s.annotationsOf(ctx, j); err == nil {
 					f.Annotations[j.ID] = anns
 				}
 			}
@@ -560,7 +786,7 @@ func (s *Service) readFinal(ctx context.Context, f *Facts, rel *Release, release
 	if f.ReleaseRun == nil {
 		return nil
 	}
-	jobs, err := s.gh.Jobs(ctx, f.ReleaseRun.ID)
+	jobs, err := s.jobsOf(ctx, *f.ReleaseRun)
 	if err != nil {
 		return err
 	}
@@ -578,15 +804,13 @@ func (s *Service) readFinal(ctx context.Context, f *Facts, rel *Release, release
 // populateReport returns what a finished populate job reported: the projects
 // that failed, the removals the release would make, and the job's error
 // annotations when it failed. A missing artifact leaves the lists empty.
-func (s *Service) populateReport(ctx context.Context, runID int64, j Job, instance string) jobReport {
-	s.cacheMu.Lock()
-	rep, ok := s.reports[j.ID]
-	s.cacheMu.Unlock()
+func (s *Service) populateReport(ctx context.Context, run Run, j Job, instance string) jobReport {
+	rep, ok := cached(s, &s.reports, j.ID)
 	if ok {
 		return rep
 	}
 	complete := true
-	data, err := s.gh.Artifact(ctx, runID, ArtifactReportPrefix+instance)
+	data, err := s.artifactOf(ctx, run, ArtifactReportPrefix+instance)
 	if err != nil {
 		// The artifact may still appear, or the call may work next time.
 		complete = false
@@ -608,7 +832,7 @@ func (s *Service) populateReport(ctx context.Context, runID int64, j Job, instan
 		}
 	}
 	if jobState(j) == StateFailure {
-		anns, err := s.gh.Annotations(ctx, j.ID)
+		anns, err := s.annotationsOf(ctx, j)
 		if err != nil {
 			complete = false
 		}
@@ -619,9 +843,7 @@ func (s *Service) populateReport(ctx context.Context, runID int64, j Job, instan
 		}
 	}
 	if complete {
-		s.cacheMu.Lock()
-		s.reports[j.ID] = rep
-		s.cacheMu.Unlock()
+		remember(s, &s.reports, j.ID, rep)
 	}
 	return rep
 }
@@ -640,58 +862,57 @@ func (s *Service) generatedSections(ctx context.Context, cutRuns []Run, branch s
 	if run == nil {
 		return nil
 	}
-	s.cacheMu.Lock()
-	sections, ok := s.generated[run.ID]
-	s.cacheMu.Unlock()
-	if ok {
+	if sections, ok := cached(s, &s.generated, run.ID); ok {
 		return sections
 	}
-	data, err := s.gh.Artifact(ctx, run.ID, ArtifactChangelogs)
+	data, err := s.artifactOf(ctx, *run, ArtifactChangelogs)
 	if err != nil {
 		return nil
 	}
-	sections = map[string]string{}
+	sections := map[string]string{}
 	if json.Unmarshal(data, &sections) != nil {
 		sections = map[string]string{}
 	}
-	s.cacheMu.Lock()
-	s.generated[run.ID] = sections
-	s.cacheMu.Unlock()
+	remember(s, &s.generated, run.ID, sections)
 	return sections
 }
 
-// pullUnits returns the units of a PR: one per release.yaml it changes.
+// pullUnits returns the units of a PR: one per release.yaml it changes. A
+// file that is missing or unusable leaves the unit with what its path tells.
+// For a fork no failed read fails the refresh: the content of a fork is not
+// ours to depend on.
 func (s *Service) pullUnits(ctx context.Context, c candidate, generated map[string]string) ([]UnitState, error) {
 	p := c.pull
-	// A fork's branch name means nothing in this repository, and the branch
-	// of a merged PR is deleted: read those by commit.
-	var refs []string
+	// Read by commit where there is one: the answer is kept. A fork's branch
+	// name means nothing in this repository, and the branch of a merged PR is
+	// deleted.
+	var refs []fileRef
 	switch {
 	case c.fork:
-		refs = []string{p.HeadSHA}
+		refs = []fileRef{{p.HeadSHA, true}}
 	case p.MergedAt != nil:
-		refs = []string{p.MergeSHA, p.HeadSHA}
+		refs = []fileRef{{p.MergeSHA, true}, {p.HeadSHA, true}}
 	default:
-		refs = []string{p.HeadRef, p.HeadSHA}
+		refs = []fileRef{{p.HeadSHA, true}, {p.HeadRef, false}}
 	}
 	units := make([]UnitState, 0, len(c.paths))
 	for _, yamlPath := range c.paths {
 		var data []byte
-		var ref string
+		var ref fileRef
 		for _, r := range refs {
-			if r == "" {
+			if r.name == "" {
 				continue
 			}
-			b, err := s.gh.File(ctx, yamlPath, r)
+			b, err := s.fileAt(ctx, yamlPath, r)
 			if err == nil {
 				data, ref = b, r
 				break
 			}
-			if !errors.Is(err, ErrNotFound) {
+			if !unusable(err) && !c.fork {
 				return nil, err
 			}
 		}
-		u, err := s.unitState(ctx, yamlPath, ref, data, generated)
+		u, err := s.unitState(ctx, yamlPath, ref, data, generated, c.fork)
 		if err != nil {
 			return nil, err
 		}
@@ -702,7 +923,7 @@ func (s *Service) pullUnits(ctx context.Context, c candidate, generated map[stri
 
 // branchUnits returns the units of a branch that has no PR: those whose
 // release.yaml on the branch differs from main.
-func (s *Service) branchUnits(ctx context.Context, branch string, generated map[string]string) ([]UnitState, error) {
+func (s *Service) branchUnits(ctx context.Context, c candidate, generated map[string]string) ([]UnitState, error) {
 	units := []UnitState{}
 	main, err := s.mainUnits(ctx)
 	if err != nil {
@@ -711,19 +932,26 @@ func (s *Service) branchUnits(ctx context.Context, branch string, generated map[
 		}
 		return nil, err
 	}
+	refs := []fileRef{{c.branchSHA, true}, {c.branch, false}}
 	for _, m := range main {
 		yamlPath := path.Join(m.def.ReleaseDir, "release.yaml")
-		data, err := s.gh.File(ctx, yamlPath, branch)
-		if errors.Is(err, ErrNotFound) {
+		var data []byte
+		var ref fileRef
+		found := false
+		for _, r := range refs {
+			b, err := s.fileAt(ctx, yamlPath, r)
+			if err == nil {
+				data, ref, found = b, r, true
+				break
+			}
+			if !unusable(err) {
+				return nil, err
+			}
+		}
+		if !found || string(data) == string(m.yaml) {
 			continue
 		}
-		if err != nil {
-			return nil, err
-		}
-		if string(data) == string(m.yaml) {
-			continue
-		}
-		u, err := s.unitState(ctx, yamlPath, branch, data, generated)
+		u, err := s.unitState(ctx, yamlPath, ref, data, generated, false)
 		if err != nil {
 			return nil, err
 		}
@@ -737,8 +965,9 @@ func (s *Service) branchUnits(ctx context.Context, branch string, generated map[
 
 // unitState describes the unit whose release.yaml is yamlPath with content
 // data at ref. Without data, or with data that cannot be parsed, only what
-// the path tells is filled in.
-func (s *Service) unitState(ctx context.Context, yamlPath, ref string, data []byte, generated map[string]string) (UnitState, error) {
+// the path tells is filled in. A changelog that is missing or unusable leaves
+// the text empty; with lenient set, so does any failed read.
+func (s *Service) unitState(ctx context.Context, yamlPath string, ref fileRef, data []byte, generated map[string]string, lenient bool) (UnitState, error) {
 	dir := path.Dir(yamlPath)
 	u := UnitState{ReleaseDir: dir, ReleaseProject: strings.ReplaceAll(strings.TrimPrefix(dir, "root/"), "/", ":")}
 	if data == nil {
@@ -749,13 +978,13 @@ func (s *Service) unitState(ctx context.Context, yamlPath, ref string, data []by
 		return u, nil
 	}
 	u.Unit, u.Tag, u.ReleaseID = rec.Project, rec.Tag, ReleaseID(rec.Tag)
-	changelog, err := s.gh.File(ctx, path.Join(dir, "CHANGELOG.md"), ref)
+	changelog, err := s.fileAt(ctx, path.Join(dir, "CHANGELOG.md"), ref)
 	switch {
 	case err == nil:
 		if section, err := ExtractSection(changelog, u.ReleaseID); err == nil {
 			u.Changelog = section
 		}
-	case !errors.Is(err, ErrNotFound):
+	case !unusable(err) && !lenient:
 		return u, err
 	}
 	if g, ok := generated[u.Unit]; ok {
@@ -813,7 +1042,7 @@ func pullable(units []UnitState) bool {
 // soft reports whether err means "not there or not usable" rather than a
 // failed GitHub call.
 func soft(err error) bool {
-	return errors.Is(err, ErrNotFound) || errors.Is(err, errUnitsFile)
+	return unusable(err) || errors.Is(err, errUnitsFile)
 }
 
 // mainUnits returns the units file of main with each unit's release.yaml on
@@ -843,7 +1072,7 @@ func (s *Service) mainUnits(ctx context.Context) ([]mainUnit, error) {
 		switch {
 		case err == nil:
 			m.yaml, m.tags = b, releaseTags(b)
-		case !errors.Is(err, ErrNotFound):
+		case !unusable(err):
 			return nil, err
 		}
 		units = append(units, m)

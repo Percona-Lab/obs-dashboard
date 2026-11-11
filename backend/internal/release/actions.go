@@ -334,7 +334,7 @@ func (s *Service) writeSection(ctx context.Context, r Release, unit string, pick
 	}
 	file := path.Join(u.ReleaseDir, "CHANGELOG.md")
 	current, err := s.gh.File(ctx, file, r.Branch)
-	if errors.Is(err, ErrNotFound) {
+	if unusable(err) {
 		return "", fmt.Errorf("%w: the changelog of %s was not found", ErrBadRequest, unit)
 	}
 	if err != nil {
