@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-11
+
 ### Added
 
 - Release tab for cutting PPG releases through GitHub. Off unless
