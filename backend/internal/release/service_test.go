@@ -708,7 +708,7 @@ func TestHistoryRows(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := fx.svc.History(context.Background(), 1)
+	rows, _, err := fx.svc.History(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +729,7 @@ func TestHistoryRows(t *testing.T) {
 	}
 
 	// Tag lookups are immutable and cached.
-	if _, err := fx.svc.History(context.Background(), 0); err != nil {
+	if _, _, err := fx.svc.History(context.Background(), 0); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(fx.gh.callsOf("TagSHA")); n != 2 {
@@ -744,7 +744,7 @@ func TestHistoryTagWithoutPR(t *testing.T) {
 	fx := historyFixture(t)
 	delete(fx.gh.commitPulls, "sha6") // PullForCommit returns 0
 	delete(fx.gh.tagSHAs, "ppg/18.6-5")
-	rows, err := fx.svc.History(context.Background(), 1)
+	rows, _, err := fx.svc.History(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -756,7 +756,7 @@ func TestHistoryTagWithoutPR(t *testing.T) {
 func TestHistoryGitHubError(t *testing.T) {
 	fx := historyFixture(t)
 	fx.gh.setErr(&APIError{Method: "GET", Path: "/repos/x/releases", Status: 500})
-	if _, err := fx.svc.History(context.Background(), 1); err == nil {
+	if _, _, err := fx.svc.History(context.Background(), 1); err == nil {
 		t.Fatal("err = nil")
 	}
 }
@@ -1088,5 +1088,35 @@ func TestSnapshotCachesDropFinishedReleases(t *testing.T) {
 	}
 	if n := fx.svc.cacheSize(); n != 0 {
 		t.Errorf("%d cache entries left for a release that is gone", n)
+	}
+}
+
+func TestHistoryMoreFollowsTheGitHubPage(t *testing.T) {
+	fx := historyFixture(t)
+	// Page 1 holds 20 GitHub releases of which only two belong to a unit;
+	// page 2 holds one more.
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 17; i++ {
+		fx.gh.releases = append(fx.gh.releases, GHRelease{Tag: fmt.Sprintf("other-%d", i), PublishedAt: base.Add(time.Duration(i) * time.Hour)})
+	}
+	fx.gh.releases = append(fx.gh.releases, GHRelease{Tag: "ppg/18.6-4", Body: "notes 4", PublishedAt: base.Add(-time.Hour)})
+	ctx := context.Background()
+
+	rows, more, err := fx.svc.History(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || !more {
+		t.Fatalf("page 1: %d rows, more = %v; want 2 rows and more", len(rows), more)
+	}
+	rows, more, err = fx.svc.History(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ReleaseID != "18.6-4" || more {
+		t.Fatalf("page 2: rows = %+v, more = %v", rows, more)
+	}
+	if rows, more, err = fx.svc.History(ctx, 3); err != nil || len(rows) != 0 || rows == nil || more {
+		t.Fatalf("page 3: rows = %#v, more = %v, err = %v", rows, more, err)
 	}
 }

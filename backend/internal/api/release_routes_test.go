@@ -22,6 +22,7 @@ import (
 
 type stubRelease struct {
 	err   error // returned by every action and read
+	more  bool  // returned by History
 	email string
 	calls []string
 }
@@ -38,8 +39,8 @@ func (s *stubRelease) Snapshot(ctx context.Context) (release.Snapshot, error) {
 func (s *stubRelease) Units(ctx context.Context) ([]release.UnitRow, error) {
 	return []release.UnitRow{}, s.rec("units", ctx)
 }
-func (s *stubRelease) History(ctx context.Context, page int) ([]release.HistoryRow, error) {
-	return []release.HistoryRow{}, s.rec(fmt.Sprintf("history%d", page), ctx)
+func (s *stubRelease) History(ctx context.Context, page int) ([]release.HistoryRow, bool, error) {
+	return []release.HistoryRow{}, s.more, s.rec(fmt.Sprintf("history%d", page), ctx)
 }
 func (s *stubRelease) Cut(ctx context.Context, email string, units []string) (string, error) {
 	return "rel1", s.rec("cut", ctx)
@@ -58,6 +59,9 @@ func (s *stubRelease) RetrySync(ctx context.Context, email, id, head string) err
 }
 func (s *stubRelease) ApproveQA(ctx context.Context, email, id, head string) error {
 	return s.rec("approve-qa", ctx)
+}
+func (s *stubRelease) RetryQA(ctx context.Context, email, id, head string) error {
+	return s.rec("retry-qa", ctx)
 }
 func (s *stubRelease) Recut(ctx context.Context, email, id, head string) error {
 	return s.rec("recut", ctx)
@@ -109,6 +113,7 @@ var releaseRoutes = []struct{ method, path, body string }{
 	{"PUT", "/api/release/releases/r1/changelog", `{"head":"h","unit":"a","section":"s"}`},
 	{"POST", "/api/release/releases/r1/changelog/reset", `{"head":"h","unit":"a"}`},
 	{"POST", "/api/release/releases/r1/approve-changelog", `{"head":"h"}`},
+	{"POST", "/api/release/releases/r1/retry-qa", `{"head":"h"}`},
 }
 
 func TestReleaseRoutesRequireUser(t *testing.T) {
@@ -244,5 +249,28 @@ func TestReleaseHappyPaths(t *testing.T) {
 	}
 	if rec = relCall(h, "POST", "/api/release/releases/r1/abandon", `{"head":`, dashOrigin, sid); rec.Code != 400 {
 		t.Fatalf("bad json: %d", rec.Code)
+	}
+}
+
+func TestReleaseHistoryReportsMore(t *testing.T) {
+	for _, more := range []bool{true, false} {
+		h, sid := releaseRouter(t, &stubRelease{more: more})
+		rec := relCall(h, "GET", "/api/release/history?page=2", "", "", sid)
+		want := fmt.Sprintf(`{"more":%v,"rows":[]}`, more)
+		if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
+			t.Errorf("more=%v: %d %s, want %s", more, rec.Code, rec.Body, want)
+		}
+	}
+}
+
+func TestReleaseRetryQARoute(t *testing.T) {
+	st := &stubRelease{}
+	h, sid := releaseRouter(t, st)
+	rec := relCall(h, "POST", "/api/release/releases/r1/retry-qa", `{"head":"h"}`, dashOrigin, sid)
+	if rec.Code != 204 || len(st.calls) != 1 || st.calls[0] != "retry-qa" || st.email != "alice@percona.com" {
+		t.Fatalf("%d %v %q", rec.Code, st.calls, st.email)
+	}
+	if rec = relCall(h, "POST", "/api/release/releases/r1/retry-qa", `{"head":"h"}`, "http://evil.test", sid); rec.Code != 403 {
+		t.Fatalf("bad origin: %d", rec.Code)
 	}
 }

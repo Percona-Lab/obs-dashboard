@@ -1173,19 +1173,22 @@ func (s *Service) Units(ctx context.Context) ([]UnitRow, error) {
 }
 
 // History returns one page (1-based, 20 GitHub releases per page) of
-// finished releases, newest first. GitHub releases whose tag no unit records
-// are left out, so a page can hold fewer than 20 rows.
-func (s *Service) History(ctx context.Context, page int) ([]HistoryRow, error) {
+// finished releases, newest first, and whether a further page may exist.
+// GitHub releases whose tag no unit records are left out, so a page can hold
+// fewer than 20 rows, or none, with more pages still to come: "more" is told
+// from the GitHub page, not from the rows.
+func (s *Service) History(ctx context.Context, page int) ([]HistoryRow, bool, error) {
 	if page < 1 {
 		page = 1
 	}
 	published, err := s.gh.Releases(ctx, page, historyPerPage)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	more := len(published) >= historyPerPage
 	main, err := s.mainUnits(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	unitOf := map[string]string{}
 	for _, m := range main {
@@ -1208,7 +1211,7 @@ func (s *Service) History(ctx context.Context, page int) ([]HistoryRow, error) {
 		}
 		tp, err := s.pullOfTag(ctx, r.Tag)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if tp.number != 0 {
 			row.PRURL = tp.url
@@ -1220,7 +1223,7 @@ func (s *Service) History(ctx context.Context, page int) ([]HistoryRow, error) {
 	if s.db != nil && len(prs) > 0 {
 		audit, err := store.ReleaseAuditByPR(s.db, prs, auditRelease)
 		if err != nil {
-			return nil, fmt.Errorf("release audit: %w", err)
+			return nil, false, fmt.Errorf("release audit: %w", err)
 		}
 		for i, pr := range prOf {
 			a, ok := audit[pr]
@@ -1236,7 +1239,7 @@ func (s *Service) History(ctx context.Context, page int) ([]HistoryRow, error) {
 		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ReleasedAt.After(rows[j].ReleasedAt) })
-	return rows, nil
+	return rows, more, nil
 }
 
 // pullOfTag returns the PR associated with the commit a tag points at; the
