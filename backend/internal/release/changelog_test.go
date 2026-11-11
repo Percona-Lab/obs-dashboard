@@ -134,3 +134,29 @@ func TestReleaseID(t *testing.T) {
 		t.Errorf("ReleaseID = %q", got)
 	}
 }
+
+func TestReplaceSectionIdentity(t *testing.T) {
+	cases := []struct {
+		name, in, id string
+	}{
+		{"LF with trailing newline, section in middle", testChangelog, "18.6-6"},
+		{"LF without trailing newline, section last", "# Changelog\n\n## [18.6-5] - 2026-10-01\n\n### Changed\n- b", "18.6-5"},
+		{"CRLF without trailing newline, section last", "# Changelog\r\n\r\n## [18.6-5] - 2026-10-01\r\n\r\n### Changed\r\n- b", "18.6-5"},
+		{"CRLF with trailing CRLF, section last", "# Changelog\r\n\r\n## [18.6-5] - 2026-10-01\r\n\r\n### Changed\r\n- b\r\n", "18.6-5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			section, err := ExtractSection([]byte(tc.in), tc.id)
+			if err != nil {
+				t.Fatalf("ExtractSection: %v", err)
+			}
+			out, err := ReplaceSection([]byte(tc.in), tc.id, section)
+			if err != nil {
+				t.Fatalf("ReplaceSection: %v", err)
+			}
+			if string(out) != tc.in {
+				t.Errorf("identity replace changed the file:\n got %q\nwant %q", out, tc.in)
+			}
+		})
+	}
+}
