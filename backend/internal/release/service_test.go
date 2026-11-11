@@ -882,3 +882,211 @@ func TestSnapshotFailedCutListedFor24h(t *testing.T) {
 		t.Fatalf("after 25h: releases = %+v, want none", snap.Releases)
 	}
 }
+
+func TestSnapshotUnusableFileDegrades(t *testing.T) {
+	unusable := fmt.Errorf("github contents x: %w", ErrUnusable)
+
+	// A changelog that is a directory: the unit keeps its identity, without text.
+	fx := newFixture(t)
+	fx.atChangelog()
+	fx.gh.fileErrs[testBranch+":"+testChangelogPath] = unusable
+	rel := fx.oneRelease(t)
+	if len(rel.Units) != 1 || rel.Units[0].ReleaseID != "18.6-6" || rel.Units[0].Changelog != "" {
+		t.Fatalf("units = %+v", rel.Units)
+	}
+
+	// A release.yaml that cannot be read: only the path is known.
+	fx = newFixture(t)
+	fx.atChangelog()
+	fx.gh.fileErrs[testBranch+":"+testYAML] = unusable
+	rel = fx.oneRelease(t)
+	want := UnitState{ReleaseProject: "ppg:releases:18", ReleaseDir: testDir}
+	if len(rel.Units) != 1 || !reflect.DeepEqual(rel.Units[0], want) {
+		t.Fatalf("units = %+v", rel.Units)
+	}
+
+	// The same on main, for the selection list.
+	fx = newFixture(t)
+	fx.gh.fileErrs["main:"+testYAML] = unusable
+	rows, err := fx.svc.Units(context.Background())
+	if err != nil || len(rows) != 2 || rows[0].LastRelease != "" {
+		t.Fatalf("rows = %+v, err = %v", rows, err)
+	}
+}
+
+func TestSnapshotForkFileErrorNeverFailsRefresh(t *testing.T) {
+	for _, bad := range []string{testYAML, testChangelogPath} {
+		fx := newFixture(t)
+		fx.atChangelog()
+		fx.gh.open = append(fx.gh.open, Pull{Number: 47, HeadRef: "feature", HeadSHA: "forkhead", HeadRepo: "someone/obs-packaging", BaseRepo: fakeRepo})
+		fx.gh.pullFiles[47] = []string{testYAML}
+		fx.gh.setFile("forkhead", testYAML, strings.Replace(cutYAML, "18.6-6", "18.6-7", 1))
+		fx.gh.setFile("forkhead", testChangelogPath, cutChangelog)
+		fx.gh.fileErrs["forkhead:"+bad] = errors.New("github GET /contents: HTTP 500")
+
+		snap := fx.snapshot(t)
+		if snap.Stale || len(snap.Releases) != 2 {
+			t.Fatalf("%s: snapshot = %+v", bad, snap)
+		}
+		for _, r := range snap.Releases {
+			if r.PR == 47 && (r.Dashboard || len(r.Units) != 1 || r.Units[0].ReleaseProject != "ppg:releases:18") {
+				t.Errorf("%s: fork = %+v", bad, r)
+			}
+		}
+		// The release of the repository itself still takes actions.
+		if err := fx.svc.ApproveChangelog(context.Background(), actor, relID, testHead); err != nil {
+			t.Errorf("%s: approve: %v", bad, err)
+		}
+	}
+
+	// The same error in a PR of the repository itself does fail the refresh.
+	fx := newFixture(t)
+	fx.atChangelog()
+	fx.gh.fileErrs[testBranch+":"+testChangelogPath] = errors.New("github GET /contents: HTTP 500")
+	if _, err := fx.svc.Snapshot(context.Background()); err == nil {
+		t.Fatal("a failed read of our own PR must not be hidden")
+	}
+}
+
+func TestSnapshotErrorTextHidesInternals(t *testing.T) {
+	fx := newFixture(t)
+	fx.atChangelog()
+	fx.snapshot(t)
+
+	fx.gh.setErr(errors.New("release audit: no such table: secret_detail"))
+	fx.svc.Invalidate()
+	snap := fx.snapshot(t)
+	if !snap.Stale || snap.Error != "internal error" {
+		t.Fatalf("non-API error: %+v", snap)
+	}
+
+	fx.gh.setErr(fmt.Errorf("wrapped: %w", &APIError{Method: "GET", Path: "/repos/x/pulls", Status: 403}))
+	fx.svc.Invalidate()
+	snap = fx.snapshot(t)
+	if snap.Error != "github GET /repos/x/pulls: HTTP 403" {
+		t.Fatalf("API error: %q", snap.Error)
+	}
+}
+
+// countCalls returns how many logged calls use one of the methods.
+func countCalls(fx *svcFixture, methods ...string) int {
+	n := 0
+	for _, m := range methods {
+		n += len(fx.gh.callsOf(m))
+	}
+	return n
+}
+
+func TestSnapshotSecondRefreshReusesCompletedRuns(t *testing.T) {
+	fx := newFixture(t)
+	fx.atQA(true, "completed", laneJob(200, "packages / pg_tde", "failure"), laneJob(201, "packages / pg_stat", "success"))
+	fx.gh.artifacts["1:"+ArtifactChangelogs] = []byte(`{"ppg:staging:18":"## [18.6-6] generated\n"}`)
+	fx.gh.artifacts["10:"+ArtifactReportPrefix+"obs"] = []byte(`[{"project":"ppg:releases:18","outcome":"success","removals":["package x"]}]`)
+	fx.gh.annotations[200] = []Annotation{{Level: "notice", Title: AnnotationJenkins, Message: "ppg:releases:18 https://jenkins/job/9"}}
+
+	first := fx.oneRelease(t)
+	if first.QA == nil || first.QA.State != "finished" || len(first.QA.Lanes) != 2 || first.QA.Lanes[0].JenkinsURL == "" || len(first.Removals) != 1 {
+		t.Fatalf("first = %+v qa = %+v", first, first.QA)
+	}
+	before := countCalls(fx, "Jobs", "Annotations", "Artifact")
+	if before == 0 {
+		t.Fatal("the first refresh read nothing")
+	}
+	fx.svc.Invalidate()
+	second := fx.oneRelease(t)
+	if after := countCalls(fx, "Jobs", "Annotations", "Artifact"); after != before {
+		t.Errorf("second refresh made %d more Jobs/Annotations/Artifact calls: %v", after-before, fx.gh.allCalls())
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Errorf("second snapshot differs:\n%+v\n%+v", first, second)
+	}
+}
+
+func TestSnapshotMissingArtifactNotAskedEveryRefresh(t *testing.T) {
+	fx := newFixture(t)
+	fx.atQA(false, "completed") // no generated-changelogs artifact, no populate report
+	fx.oneRelease(t)
+	before := countCalls(fx, "Artifact")
+	fx.svc.Invalidate()
+	fx.oneRelease(t)
+	if after := countCalls(fx, "Artifact"); after != before {
+		t.Errorf("missing artifacts asked again: %d -> %d", before, after)
+	}
+	// It is looked for again later: an artifact can turn up late.
+	fx.clock.advance(missingArtifactTTL + time.Second)
+	fx.oneRelease(t)
+	if after := countCalls(fx, "Artifact"); after == before {
+		t.Error("missing artifacts are never asked again")
+	}
+}
+
+func TestSnapshotRunningRunIsReadAgain(t *testing.T) {
+	fx := newFixture(t)
+	fx.atQA(true, "in_progress", Job{ID: 200, Name: JobLanePrefix + "packages / pg_tde", Status: "in_progress"})
+	fx.oneRelease(t)
+	jobs, anns := countCalls(fx, "Jobs"), countCalls(fx, "Annotations")
+	fx.svc.Invalidate()
+	fx.oneRelease(t)
+	if countCalls(fx, "Jobs") == jobs || countCalls(fx, "Annotations") == anns {
+		t.Error("a run in progress was served from the cache")
+	}
+}
+
+func TestSnapshotFilesByCommitAreKept(t *testing.T) {
+	fx := newFixture(t)
+	fx.atReleasing("failure")
+	fx.oneRelease(t)
+	byCommit := func() int {
+		n := 0
+		for _, c := range fx.gh.callsOf("File") {
+			if strings.HasSuffix(c, " merge1") {
+				n++
+			}
+		}
+		return n
+	}
+	before := byCommit()
+	if before == 0 {
+		t.Fatal("nothing was read by commit")
+	}
+	fx.svc.Invalidate()
+	fx.oneRelease(t)
+	if after := byCommit(); after != before {
+		t.Errorf("files of a commit read again: %d -> %d", before, after)
+	}
+}
+
+func TestSnapshotClosedPullAnswerIsKept(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.gh.closedHeads[testBranch] = true
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v", snap.Releases)
+	}
+	fx.svc.Invalidate()
+	fx.snapshot(t)
+	if n := countCalls(fx, "HasClosedPull"); n != 1 {
+		t.Errorf("HasClosedPull called %d times, want 1", n)
+	}
+}
+
+func TestSnapshotCachesDropFinishedReleases(t *testing.T) {
+	fx := newFixture(t)
+	fx.atQA(true, "completed", laneJob(200, "packages / pg_tde", "success"))
+	fx.gh.artifacts["1:"+ArtifactChangelogs] = []byte(`{"ppg:staging:18":"## [18.6-6] generated\n"}`)
+	fx.oneRelease(t)
+	if fx.svc.cacheSize() == 0 {
+		t.Fatal("nothing was cached")
+	}
+	// The release is gone: abandoned and its runs aged out.
+	fx.gh.mu.Lock()
+	fx.gh.open, fx.gh.branches, fx.gh.runs = nil, nil, nil
+	fx.gh.mu.Unlock()
+	fx.svc.Invalidate()
+	if snap := fx.snapshot(t); len(snap.Releases) != 0 {
+		t.Fatalf("releases = %+v", snap.Releases)
+	}
+	if n := fx.svc.cacheSize(); n != 0 {
+		t.Errorf("%d cache entries left for a release that is gone", n)
+	}
+}

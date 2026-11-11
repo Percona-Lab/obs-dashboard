@@ -456,3 +456,51 @@ func TestGitHubHasClosedPull(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubFileUnusable(t *testing.T) {
+	bodies := map[string]string{
+		"directory":  `[{"type":"file","name":"a"},{"type":"file","name":"b"}]`,
+		"symlink":    `{"type":"symlink","target":"../x","encoding":"base64","content":""}`,
+		"submodule":  `{"type":"submodule","submodule_git_url":"git://x"}`,
+		"too large":  `{"type":"file","encoding":"none","content":"","size":2000000}`,
+		"bad base64": `{"type":"file","encoding":"base64","content":"!!!"}`,
+	}
+	for name, body := range bodies {
+		c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
+		_, err := c.File(context.Background(), "root/x/CHANGELOG.md", "main")
+		if !errors.Is(err, ErrUnusable) {
+			t.Errorf("%s: err = %v, want ErrUnusable", name, err)
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: must not read as not found", name)
+		}
+	}
+}
+
+func TestGitHubETagCacheBounded(t *testing.T) {
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"`+r.URL.Path+`"`)
+		fmt.Fprint(w, `[]`)
+	}))
+	ctx := context.Background()
+	for i := 0; i < maxCacheEntries+25; i++ {
+		if _, err := c.Jobs(ctx, int64(i)); err == nil {
+			t.Fatal("want a decode error for a bare list") // the body is not a jobs object
+		}
+		// Keep the first entry in use: it must survive the eviction.
+		if _, _, err := c.do(ctx, http.MethodGet, c.repoPath("actions/runs/0/jobs?per_page=100"), nil, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.cache) != maxCacheEntries {
+		t.Fatalf("cache holds %d entries, want %d", len(c.cache), maxCacheEntries)
+	}
+	if _, ok := c.cache[c.base()+c.repoPath("actions/runs/0/jobs?per_page=100")]; !ok {
+		t.Error("the entry in constant use was evicted")
+	}
+	if _, ok := c.cache[c.base()+c.repoPath("actions/runs/1/jobs?per_page=100")]; ok {
+		t.Error("the oldest unused entry was kept")
+	}
+}

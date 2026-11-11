@@ -213,6 +213,8 @@ func TestActionResetChangelog(t *testing.T) {
 	}
 	fx.wantNoWrites(t)
 
+	// A finished run's missing artifact is looked for again after a while.
+	fx.clock.advance(missingArtifactTTL)
 	fx.gh.artifacts["1:"+ArtifactChangelogs] = []byte(`{"ppg:staging:18":"## [18.6-6] generated\n\n- From the cut\n"}`)
 	newHead, err := fx.svc.ResetChangelog(context.Background(), actor, "20261111T143210", testHead, testUnit)
 	if err != nil {
