@@ -22,13 +22,14 @@ const maxReleaseBody = 256 << 10
 type ReleaseService interface {
 	Snapshot(ctx context.Context) (release.Snapshot, error)
 	Units(ctx context.Context) ([]release.UnitRow, error)
-	History(ctx context.Context, page int) ([]release.HistoryRow, error)
+	History(ctx context.Context, page int) ([]release.HistoryRow, bool, error)
 	Cut(ctx context.Context, email string, units []string) (string, error)
 	SaveChangelog(ctx context.Context, email, id, head, unit, section string) (string, error)
 	ResetChangelog(ctx context.Context, email, id, head, unit string) (string, error)
 	ApproveChangelog(ctx context.Context, email, id, head string) error
 	RetrySync(ctx context.Context, email, id, head string) error
 	ApproveQA(ctx context.Context, email, id, head string) error
+	RetryQA(ctx context.Context, email, id, head string) error
 	Recut(ctx context.Context, email, id, head string) error
 	Release(ctx context.Context, email, id, head string, confirmFailed bool) error
 	RetryRelease(ctx context.Context, email, id string) error
@@ -117,7 +118,7 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 			}
 			page = n
 		}
-		rows, err := svc.History(req.Context(), page)
+		rows, more, err := svc.History(req.Context(), page)
 		if err != nil {
 			relFail(w, req, err)
 			return
@@ -125,7 +126,7 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 		if rows == nil {
 			rows = []release.HistoryRow{}
 		}
-		relJSON(w, http.StatusOK, map[string]any{"rows": rows})
+		relJSON(w, http.StatusOK, map[string]any{"rows": rows, "more": more})
 	})
 
 	r.With(origin).Post("/api/release/releases", func(w http.ResponseWriter, req *http.Request) {
@@ -176,7 +177,7 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 	r.With(origin).Post("/api/release/releases/{id}/{action}", func(w http.ResponseWriter, req *http.Request) {
 		id, action := chi.URLParam(req, "id"), chi.URLParam(req, "action")
 		switch action {
-		case "approve-changelog", "retry-sync", "approve-qa", "recut", "release", "retry-release", "abandon":
+		case "approve-changelog", "retry-sync", "approve-qa", "retry-qa", "recut", "release", "retry-release", "abandon":
 		default:
 			http.NotFound(w, req)
 			return
@@ -197,6 +198,8 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 			err = svc.RetrySync(ctx, email, id, body.Head)
 		case "approve-qa":
 			err = svc.ApproveQA(ctx, email, id, body.Head)
+		case "retry-qa":
+			err = svc.RetryQA(ctx, email, id, body.Head)
 		case "recut":
 			err = svc.Recut(ctx, email, id, body.Head)
 		case "release":
