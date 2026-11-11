@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import ReleaseUnitList from './ReleaseUnitList.vue'
 import ReleaseHistory from './ReleaseHistory.vue'
 import ReleaseWizard from './ReleaseWizard.vue'
+import { safeHref } from '../../lib/safeHref'
 import type { ReleaseState, ReleaseStep } from '../../types/release'
 
 const { snapshot, units, unitsError, notice, busy, loadUnits, cut } = useRelease()
@@ -18,8 +19,24 @@ const selected = computed(() => releases.value.find((r) => r.id === selectedId.v
 
 // The selected release finished or was abandoned: back to the landing view.
 // Only once a snapshot has arrived, so a fresh cut is not dropped before it shows up.
+// A release just cut stays selected while GitHub has not listed it yet (`pendingId`),
+// for up to START_WAIT_MS.
+const START_WAIT_MS = 90_000
+const pendingId = ref<string | null>(null)
+let pendingTimer: ReturnType<typeof setTimeout> | undefined
+function clearPending() {
+  pendingId.value = null
+  if (pendingTimer !== undefined) clearTimeout(pendingTimer)
+  pendingTimer = undefined
+}
+function leaveStarting() {
+  clearPending()
+  selectedId.value = null
+}
+onUnmounted(clearPending)
 watch(releases, (rs) => {
-  if (selectedId.value && snapshot.value && !rs.some((r) => r.id === selectedId.value)) selectedId.value = null
+  if (pendingId.value && rs.some((r) => r.id === pendingId.value)) clearPending()
+  if (selectedId.value && selectedId.value !== pendingId.value && snapshot.value && !rs.some((r) => r.id === selectedId.value)) selectedId.value = null
 })
 
 // Refresh the unit list when the set of release ids changes.
@@ -30,7 +47,16 @@ onMounted(() => { void loadUnits() })
 async function onCut(ticked: string[]) {
   const id = await cut(ticked)
   await loadUnits()
-  if (id) selectedId.value = id
+  if (!id) return
+  selectedId.value = id
+  if (releases.value.some((r) => r.id === id)) return
+  clearPending()
+  pendingId.value = id
+  pendingTimer = setTimeout(() => {
+    if (pendingId.value !== id) return
+    leaveStarting()
+    notice.value = 'The cut did not start. Check the Actions tab of the repository.'
+  }, START_WAIT_MS)
 }
 
 // blocked.release_id may be a unit release id rather than the release's own id.
@@ -62,6 +88,10 @@ const when = (iso: string | null) => {
     <!-- wizard: Task 12 -->
     <ReleaseWizard v-if="selected" :release="selected" @back="selectedId = null" />
     <!-- /wizard -->
+    <section v-else-if="selectedId && selectedId === pendingId" data-testid="release-starting" class="rounded-[14px] border border-border bg-bg-card p-5">
+      <button type="button" class="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-brand-purple" @click="leaveStarting">← Back</button>
+      <p class="m-0 mt-3 text-text-primary">Starting the cut…</p>
+    </section>
 
     <template v-else>
       <section data-testid="in-flight" class="rounded-[14px] border border-border bg-bg-card p-5">
@@ -72,7 +102,7 @@ const when = (iso: string | null) => {
             <button type="button" data-testid="open-in-flight" class="cursor-pointer border-0 bg-transparent p-0 font-mono text-[13px] font-semibold text-brand-purple" @click="selectedId = r.id">
               {{ r.units.length ? r.units.map((u) => u.release_id).join(', ') : r.id }}
             </button>
-            <a v-if="r.pr && r.pr_url" :href="r.pr_url" target="_blank" rel="noopener noreferrer" class="text-[12px] text-brand-purple">PR #{{ r.pr }}</a>
+            <a v-if="r.pr && safeHref(r.pr_url)" :href="safeHref(r.pr_url)" target="_blank" rel="noopener noreferrer" class="text-[12px] text-brand-purple">PR #{{ r.pr }}</a>
             <span class="text-[12px] text-text-muted">started by {{ r.started_by || 'unknown' }}<template v-if="when(r.started_at)"> · {{ when(r.started_at) }}</template></span>
             <span class="ml-auto rounded-full bg-bg-muted px-2 py-[2px] text-[11px]" :class="r.step === 'cutting' && r.cut?.state === 'failure' ? 'text-fail' : 'text-text-secondary'">{{ stepLabel(r) }}</span>
           </li>

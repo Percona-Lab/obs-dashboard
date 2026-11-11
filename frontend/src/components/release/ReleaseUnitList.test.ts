@@ -62,4 +62,19 @@ describe('ReleaseUnitList', () => {
     expect(w.get('[data-testid="units-error"]').text()).toContain('boom')
     expect(w.find('[data-testid="cut-release"]').exists()).toBe(false)
   })
+
+  it('does not re-tick a unit that was blocked in between and becomes tickable again', async () => {
+    const w = mk()
+    const tools = 'ppg:staging:common:tools'
+    await w.get(`[data-unit="${tools}"] input`).setValue(true)
+    const blockedUnits = units.map((u) => u.unit === tools ? { ...u, tickable: false, blocked: { reason: 'unchanged' as const, text: 'Nothing new' } } : u)
+    await w.setProps({ units: blockedUnits })
+    await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+    await w.get('[data-testid="cut-release"]').trigger('click')
+    expect(w.emitted('cut')![0]).toEqual([['ppg:staging:18']])
+    await w.setProps({ units })
+    expect((w.get(`[data-unit="${tools}"] input`).element as HTMLInputElement).checked).toBe(false)
+    await w.get('[data-testid="cut-release"]').trigger('click')
+    expect(w.emitted('cut')![1]).toEqual([['ppg:staging:18']])
+  })
 })

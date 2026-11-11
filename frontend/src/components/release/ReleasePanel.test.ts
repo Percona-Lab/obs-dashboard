@@ -59,4 +59,52 @@ describe('ReleasePanel', () => {
     await w.get('[data-testid="release-notice"] button').trigger('click')
     expect(w.find('[data-testid="release-notice"]').exists()).toBe(false)
   })
+
+  it('keeps a just-cut release selected until it is listed', async () => {
+    vi.useFakeTimers()
+    try {
+      const { snapshot, cut } = useRelease()
+      snapshot.value = snap([])
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => Promise.resolve(
+        init?.method === 'POST' ? json({ id: 'r9' })
+          : url.includes('/history') ? json({ rows: [] }) : url.includes('/units') ? json({ units: [{ unit: 'ppg:staging:18', members: [], release_project: '', release_dir: '', last_release: '', built: 1, total: 1, tickable: true }] })
+          : json(snap([])))))
+      const w = mount(ReleasePanel)
+      await flushPromises()
+      void cut
+      await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+      await w.get('[data-testid="cut-release"]').trigger('click')
+      await flushPromises()
+      expect(w.get('[data-testid="release-starting"]').text()).toContain('Starting the cut')
+      snapshot.value = snap([])
+      await flushPromises()
+      expect(w.find('[data-testid="release-starting"]').exists()).toBe(true)
+      snapshot.value = snap([rel({ id: 'r9', step: 'cutting', pr: 0, pr_url: '', units: [], cut: { state: 'queued', url: '' } })])
+      await flushPromises()
+      expect(w.find('[data-testid="release-starting"]').exists()).toBe(false)
+      expect(w.find('[data-testid="release-wizard"]').exists()).toBe(true)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('gives up after 90 seconds when the cut never appears', async () => {
+    vi.useFakeTimers()
+    try {
+      const { snapshot } = useRelease()
+      snapshot.value = snap([])
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => Promise.resolve(
+        init?.method === 'POST' ? json({ id: 'r9' })
+          : url.includes('/history') ? json({ rows: [] }) : url.includes('/units') ? json({ units: [{ unit: 'ppg:staging:18', members: [], release_project: '', release_dir: '', last_release: '', built: 1, total: 1, tickable: true }] })
+          : json(snap([])))))
+      const w = mount(ReleasePanel)
+      await flushPromises()
+      await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+      await w.get('[data-testid="cut-release"]').trigger('click')
+      await flushPromises()
+      expect(w.find('[data-testid="release-starting"]').exists()).toBe(true)
+      await vi.advanceTimersByTimeAsync(91_000)
+      await flushPromises()
+      expect(w.find('[data-testid="release-starting"]').exists()).toBe(false)
+      expect(useRelease().notice.value).toBe('The cut did not start. Check the Actions tab of the repository.')
+    } finally { vi.useRealTimers() }
+  })
 })

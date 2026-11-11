@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { UnitRow } from '../../types/release'
 
 const props = defineProps<{ units: UnitRow[]; busy: boolean; error: string }>()
@@ -26,8 +26,11 @@ const groups = computed(() => {
   return keys.map((k) => ({ key: k, title: /^\d+$/.test(k) ? `PostgreSQL ${k}` : 'Common', rows: m.get(k)! }))
 })
 
-// Only units that are still tickable stay selected after a refresh.
-const selected = computed(() => ticked.value.filter((u) => props.units.some((r) => r.unit === u && r.tickable)))
+// Drop ticks on units that are no longer tickable, so one that is blocked and
+// later tickable again is not silently re-ticked.
+const isTickable = (u: string) => props.units.some((r) => r.unit === u && r.tickable)
+watch(() => props.units, () => { ticked.value = ticked.value.filter(isTickable) })
+const selected = computed(() => ticked.value.filter(isTickable))
 
 function toggle(unit: string, on: boolean) {
   ticked.value = on ? [...ticked.value, unit] : ticked.value.filter((u) => u !== unit)
