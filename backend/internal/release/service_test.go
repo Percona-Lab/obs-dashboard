@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -1118,5 +1119,34 @@ func TestHistoryMoreFollowsTheGitHubPage(t *testing.T) {
 	}
 	if rows, more, err = fx.svc.History(ctx, 3); err != nil || len(rows) != 0 || rows == nil || more {
 		t.Fatalf("page 3: rows = %#v, more = %v, err = %v", rows, more, err)
+	}
+}
+
+// TestReleaseJSONFields pins the field names the frontend types rely on.
+func TestReleaseJSONFields(t *testing.T) {
+	fx := newFixture(t)
+	fx.qaFailedToStart()
+	b, err := json.Marshal(fx.oneRelease(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["sync_url"] != "" { // the fixture's sync run has no URL
+		t.Errorf("sync_url = %#v", m["sync_url"])
+	}
+	qa, _ := m["qa"].(map[string]any)
+	if qa["state"] != "failure" || qa["url"] != "https://github.com/run/11" || qa["error"] != "QA could not start." {
+		t.Errorf("qa = %#v", qa)
+	}
+	if lanes, ok := qa["lanes"].([]any); !ok || len(lanes) != 0 {
+		t.Errorf("qa.lanes = %#v, want an empty list", qa["lanes"])
+	}
+	for _, k := range []string{"pending", "pendingUnits", "syncRunDone", "finalRunDone"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("internal field %q is sent to the browser", k)
+		}
 	}
 }
