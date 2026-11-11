@@ -323,6 +323,7 @@ type Service struct {
 	commitFiles    factCache[fileKey, commitFile]      // commit sha + path
 	closedPulls    factCache[string, struct{}]         // branch that has a closed PR
 	tagPulls       map[string]tagPull                  // tag -> PR of the tagged commit
+	releasedTags   map[string]struct{}                 // tags that have a GitHub release
 
 	// Cuts dispatched and not yet listed by GitHub, by branch. Also under
 	// cacheMu. Not release state: an entry lives two minutes at most.
@@ -358,7 +359,8 @@ type tagPull struct {
 func NewService(o Options) *Service {
 	s := &Service{
 		gh: o.GitHub, db: o.DB, pkgs: o.Packages, now: o.Now, ttl: o.TTL,
-		tagPulls: map[string]tagPull{},
+		tagPulls:     map[string]tagPull{},
+		releasedTags: map[string]struct{}{},
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -635,6 +637,9 @@ func (s *Service) refresh(ctx context.Context) ([]Release, error) {
 		if err != nil {
 			return nil, err
 		}
+		if rel.finished {
+			continue
+		}
 		releases = append(releases, rel)
 	}
 	// A cancelled or timed out refresh may have skipped optional reads.
@@ -794,6 +799,12 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 		rel.PR, rel.PRURL, rel.HeadSHA = p.Number, p.HTMLURL, p.HeadSHA
 		if p.MergedAt != nil {
 			err = s.readFinal(ctx, &f, &rel, releaseRuns)
+			if err == nil && f.ReleaseRun == nil {
+				// No run is named after the PR (a release made before the
+				// run names, or by hand): it is done once every tag has a
+				// GitHub release. A PR whose tags cannot be read is not shown.
+				rel.finished, err = s.allReleased(ctx, rel.Units)
+			}
 		} else {
 			err = s.readHead(ctx, &f, &rel)
 		}
@@ -925,6 +936,49 @@ func (s *Service) readFinal(ctx context.Context, f *Facts, rel *Release, release
 		}
 	}
 	return nil
+}
+
+// releasePages bounds how far allReleased reads the GitHub releases.
+const releasePages, releasesPerPage = 3, 100
+
+// allReleased reports whether every unit's tag has a GitHub release. It is
+// true when no unit has a tag. A tag with a release is kept for good; one
+// without is asked for again.
+func (s *Service) allReleased(ctx context.Context, units []UnitState) (bool, error) {
+	var want []string
+	for _, u := range units {
+		if u.Tag != "" {
+			want = append(want, u.Tag)
+		}
+	}
+	missing := func() int {
+		s.cacheMu.Lock()
+		defer s.cacheMu.Unlock()
+		n := 0
+		for _, t := range want {
+			if _, ok := s.releasedTags[t]; !ok {
+				n++
+			}
+		}
+		return n
+	}
+	for page := 1; missing() > 0 && page <= releasePages; page++ {
+		rs, err := s.gh.Releases(ctx, page, releasesPerPage)
+		if err != nil {
+			return false, err
+		}
+		s.cacheMu.Lock()
+		for _, r := range rs {
+			if !r.PublishedAt.IsZero() { // a draft is not published
+				s.releasedTags[r.Tag] = struct{}{}
+			}
+		}
+		s.cacheMu.Unlock()
+		if len(rs) < releasesPerPage {
+			break
+		}
+	}
+	return missing() == 0, nil
 }
 
 // populateReport returns what a finished populate job reported: the projects

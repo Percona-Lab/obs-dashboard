@@ -305,6 +305,24 @@ func TestGitHubMergedPullsStopsAtSince(t *testing.T) {
 	}
 }
 
+func TestGitHubMergedPullsOnlyMergedInWindow(t *testing.T) {
+	now := time.Now().UTC()
+	ts := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339) }
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `[
+		{"number":2,"merged_at":%q,"updated_at":%q,"head":{},"base":{}},
+		{"number":1,"merged_at":%q,"updated_at":%q,"head":{},"base":{}}]`,
+			ts(-48*time.Hour), ts(-time.Hour), ts(-30*24*time.Hour), ts(-time.Hour))
+	}))
+	got, err := c.MergedPulls(context.Background(), now.Add(-7*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Number != 2 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestGitHubRunsAndWorkflowFile(t *testing.T) {
 	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("head_sha") != "abc" {

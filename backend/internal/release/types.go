@@ -116,4 +116,5 @@ type Release struct {
 	pending      bool     // a cut was dispatched and GitHub does not list its run yet
 	pendingUnits []string // units of a pending first cut
 	heldUnits    []string // units of a cut that waits for approval, when GitHub shows none
+	finished     bool     // a merged release that is done: not listed
 }

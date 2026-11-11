@@ -11,6 +11,10 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release tab listing already-finished merged release PRs as releases in progress.
+
 ## [0.2.0] - 2026-11-11
 
 ### Added
