@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import ReleaseChangelogStep from './ReleaseChangelogStep.vue'
 import type { ReleaseState } from '../../types/release'
@@ -18,7 +18,7 @@ const rel = (o: Partial<ReleaseState> = {}, changelog = 'orig', generated: strin
   cut: null, sync_state: '', sync: [], removals: [], qa: null, final: null, started_by: '', started_at: null, actions: [], ...o,
 })
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
 
 describe('ReleaseChangelogStep', () => {
   it('save sends head, unit and the edited section', async () => {
@@ -70,5 +70,95 @@ describe('ReleaseChangelogStep', () => {
     await w.setProps({ release: rel({ head_sha: 'def' }, 'saved') })
     expect(w.find('[data-testid="head-changed"]').exists()).toBe(false)
     expect(w.find('[data-testid="dirty-dot"]').exists()).toBe(false)
+  })
+
+  const two = (head: string, a: string, b: string): ReleaseState => {
+    const r = rel({ head_sha: head })
+    r.units = [
+      { ...r.units[0], unit: 'a', release_id: 'A-1', changelog: a, generated: 'genA' },
+      { ...r.units[0], unit: 'b', release_id: 'B-1', changelog: b, generated: 'genB' },
+    ]
+    return r
+  }
+
+  it('saving one unit does not flag another unit with unsaved edits', async () => {
+    const w = mount(ReleaseChangelogStep, { props: { release: two('h1', 'a0', 'b0') } })
+    await w.get('textarea').setValue('a1')
+    await w.findAll('[data-testid="unit-tab"]')[1].trigger('click')
+    await w.get('textarea').setValue('b-mine')
+    await w.setProps({ release: two('h2', 'a1', 'b0') })
+    expect(w.find('[data-testid="head-changed"]').exists()).toBe(false)
+    expect((w.get('textarea').element as HTMLTextAreaElement).value).toBe('b-mine')
+    // the head moved again with B still unchanged upstream: still no warning
+    await w.setProps({ release: two('h3', 'a1', 'b0') })
+    expect(w.find('[data-testid="head-changed"]').exists()).toBe(false)
+  })
+
+  it('reset asks before discarding unsaved edits', async () => {
+    const w = mount(ReleaseChangelogStep, { props: { release: rel() }, attachTo: document.body })
+    await w.get('textarea').setValue('mine')
+    await w.get('[data-testid="reset-changelog"]').trigger('click')
+    expect(resetChangelog).not.toHaveBeenCalled()
+    expect(w.get('[data-testid="release-confirm"]').text()).toContain('Discard your edits to 18.6-6 and restore the generated text?')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(resetChangelog).toHaveBeenCalledWith('20261111T143210', 'abc', 'ppg:staging:18')
+    w.unmount()
+  })
+
+  it('reset without unsaved edits does not ask', async () => {
+    const w = mount(ReleaseChangelogStep, { props: { release: rel() }, attachTo: document.body })
+    await w.get('[data-testid="reset-changelog"]').trigger('click')
+    expect(w.find('[data-testid="release-confirm"]').exists()).toBe(false)
+    expect(resetChangelog).toHaveBeenCalledWith('20261111T143210', 'abc', 'ppg:staging:18')
+    w.unmount()
+  })
+
+  it('a successful reset leaves no warning and no unsaved dot', async () => {
+    let done!: (v: boolean) => void
+    resetChangelog.mockImplementationOnce(() => new Promise<boolean>((r) => { done = r }))
+    const w = mount(ReleaseChangelogStep, { props: { release: rel() }, attachTo: document.body })
+    await w.get('textarea').setValue('mine')
+    await w.get('[data-testid="reset-changelog"]').trigger('click')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    // the refreshed snapshot lands before the call resolves
+    await w.setProps({ release: rel({ head_sha: 'def' }, 'gen', 'gen') })
+    done(true)
+    await flushPromises()
+    expect((w.get('textarea').element as HTMLTextAreaElement).value).toBe('gen')
+    expect(w.find('[data-testid="head-changed"]').exists()).toBe(false)
+    expect(w.find('[data-testid="dirty-dot"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('a failed reset leaves the text untouched', async () => {
+    resetChangelog.mockImplementationOnce(() => Promise.resolve(false))
+    const w = mount(ReleaseChangelogStep, { props: { release: rel() }, attachTo: document.body })
+    await w.get('textarea').setValue('mine')
+    await w.get('[data-testid="reset-changelog"]').trigger('click')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    await flushPromises()
+    expect((w.get('textarea').element as HTMLTextAreaElement).value).toBe('mine')
+    w.unmount()
+  })
+
+  it('a failed save keeps the edited text', async () => {
+    saveChangelog.mockImplementationOnce(() => Promise.resolve(false))
+    const w = mount(ReleaseChangelogStep, { props: { release: rel() } })
+    await w.get('textarea').setValue('mine')
+    await w.get('[data-testid="save-changelog"]').trigger('click')
+    await flushPromises()
+    await w.setProps({ release: rel() })
+    expect((w.get('textarea').element as HTMLTextAreaElement).value).toBe('mine')
+    expect(w.find('[data-testid="dirty-dot"]').exists()).toBe(true)
+  })
+
+  it('switching unit tabs keeps unsaved edits', async () => {
+    const w = mount(ReleaseChangelogStep, { props: { release: two('h1', 'a0', 'b0') } })
+    await w.get('textarea').setValue('a-mine')
+    const tabs = w.findAll('[data-testid="unit-tab"]')
+    await tabs[1].trigger('click')
+    expect((w.get('textarea').element as HTMLTextAreaElement).value).toBe('b0')
+    await tabs[0].trigger('click')
+    expect((w.get('textarea').element as HTMLTextAreaElement).value).toBe('a-mine')
   })
 })

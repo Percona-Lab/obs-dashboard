@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useRelease } from '../../composables/useRelease'
+import ReleaseConfirm from './ReleaseConfirm.vue'
 import { parseChangelog, segments } from '../../lib/changelogPreview'
 import type { ReleaseState } from '../../types/release'
 
@@ -15,18 +16,21 @@ const conflict = reactive<Record<string, boolean>>({})
 
 const editable = computed(() => props.release.dashboard)
 
-// Per unit: new text from the snapshot replaces the editor only if there are no unsaved edits.
+// Per unit: `synced` is the changelog the editor was last synced with. A unit is in conflict only
+// when its changelog changed upstream while it has unsaved edits; a head move alone is not a conflict.
 watch(() => props.release, (r) => {
   for (const u of r.units) {
     if (!(u.unit in text)) {
       text[u.unit] = u.changelog; synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha
       continue
     }
-    if (u.changelog === text[u.unit]) {
+    if (u.changelog === text[u.unit]) { // saved, reset or discarded: in line with the snapshot
       synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha; conflict[u.unit] = false
-    } else if (text[u.unit] === synced[u.unit]) {
+    } else if (u.changelog === synced[u.unit]) { // unchanged upstream, the edits stay
+      syncedHead[u.unit] = r.head_sha
+    } else if (text[u.unit] === synced[u.unit]) { // changed upstream, no edits: take it
       text[u.unit] = u.changelog; synced[u.unit] = u.changelog; syncedHead[u.unit] = r.head_sha; conflict[u.unit] = false
-    } else if (syncedHead[u.unit] !== r.head_sha) {
+    } else {
       conflict[u.unit] = true
     }
   }
@@ -46,12 +50,25 @@ async function save() {
   if (!u) return
   await saveChangelog(props.release.id, props.release.head_sha, u.unit, text[u.unit])
 }
-async function reset() {
+const resetDialog = ref<{ id: string; head: string; unit: string; releaseId: string } | null>(null)
+function reset() {
   const u = unit.value
   if (!u) return
-  if (await resetChangelog(props.release.id, props.release.head_sha, u.unit) && u.generated !== null) {
-    text[u.unit] = u.generated
-  }
+  const target = { id: props.release.id, head: props.release.head_sha, unit: u.unit, releaseId: u.release_id }
+  if (dirty(u.unit)) resetDialog.value = target
+  else void doReset(target)
+}
+function confirmReset() {
+  const t = resetDialog.value
+  resetDialog.value = null
+  if (t) void doReset(t)
+}
+async function doReset(t: { id: string; head: string; unit: string }) {
+  if (!(await resetChangelog(t.id, t.head, t.unit))) return
+  const cur = props.release.units.find((x) => x.unit === t.unit)
+  const gen = cur?.generated ?? cur?.changelog
+  if (gen == null) return
+  text[t.unit] = gen; synced[t.unit] = gen; syncedHead[t.unit] = props.release.head_sha; conflict[t.unit] = false
 }
 async function approve() {
   await act(props.release.id, 'approve-changelog', props.release.head_sha)
@@ -69,7 +86,7 @@ async function approve() {
     </div>
 
     <div v-if="unit && conflict[unit.unit]" data-testid="head-changed" class="rounded-[10px] border border-warn bg-warn-tint px-3 py-2 text-text-primary">
-      The release changed on GitHub. Saving will fail; copy your text and reload.
+      The release changed on GitHub while you were editing. Your text is kept below; the changelog on GitHub now differs from what you started from. Save to overwrite it with your text, or reset to take the new one.
     </div>
 
     <div v-if="unit" class="grid grid-cols-1 gap-[10px] md:grid-cols-2">
@@ -103,5 +120,6 @@ async function approve() {
       <span>Approving starts the pre-release sync for all units. Staging is frozen while it copies.</span>
       <button type="button" data-testid="approve-changelog" :disabled="anyDirty || busy" class="cursor-pointer rounded-md border-0 bg-brand-purple px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="approve">Approve changelogs &amp; start sync →</button>
     </div>
+    <ReleaseConfirm v-if="resetDialog" title="Discard your edits?" :body="`Discard your edits to ${resetDialog.releaseId} and restore the generated text?`" confirm-label="Discard & restore" danger @confirm="confirmReset" @cancel="resetDialog = null" />
   </div>
 </template>

@@ -41,13 +41,16 @@ function link(l: Lane): { text: string; href: string | undefined } {
     : { text: 'GitHub job ↗', href: safeHref(l.url) }
 }
 
-const dialog = ref(false)
+// Pins the release id, head and failed-lane state the user saw when the dialog opened.
+const dialog = ref<{ id: string; head: string; confirmFailed: boolean } | null>(null)
+const openRelease = () => { dialog.value = { id: props.release.id, head: props.release.head_sha, confirmFailed: failed.value.length > 0 } }
 const releaseBody = computed(() => failed.value.length
   ? `These QA lanes failed: ${failed.value.map((l) => l.name).join(', ')}. The release merges the PR and cannot be undone.`
   : 'This merges the release PR and cannot be undone.')
 async function doRelease() {
-  dialog.value = false
-  await act(props.release.id, 'release', props.release.head_sha, failed.value.length > 0)
+  const d = dialog.value
+  dialog.value = null
+  if (d) await act(d.id, 'release', d.head, d.confirmFailed)
 }
 const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha)
 </script>
@@ -94,11 +97,11 @@ const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha
       <p v-if="failed.length" class="m-0 text-[12px] text-text-muted">Fix the failures outside the dashboard, then use "Update to latest main &amp; restart" above, or release anyway after a confirmation.</p>
 
       <div v-if="canAct" class="flex items-center gap-3">
-        <button type="button" data-testid="release" :disabled="!canRelease" class="cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="dialog = true">Release</button>
+        <button type="button" data-testid="release" :disabled="!canRelease" class="cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="openRelease">Release</button>
         <small v-if="qa.state !== 'finished'" class="text-text-muted">Available once every QA lane has finished.</small>
       </div>
     </template>
 
-    <ReleaseConfirm v-if="dialog" :title="failed.length ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="failed.length ? 'Release anyway' : 'Release'" :danger="failed.length > 0" @confirm="doRelease" @cancel="dialog = false" />
+    <ReleaseConfirm v-if="dialog" :title="failed.length ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="failed.length ? 'Release anyway' : 'Release'" :danger="failed.length > 0" @confirm="doRelease" @cancel="dialog = null" />
   </div>
 </template>
