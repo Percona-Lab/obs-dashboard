@@ -3,6 +3,10 @@ import { computed, ref } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import ReleaseChangelogStep from './ReleaseChangelogStep.vue'
 import ReleaseConfirm from './ReleaseConfirm.vue'
+import ReleaseQaStep from './ReleaseQaStep.vue'
+import ReleaseRemovals from './ReleaseRemovals.vue'
+import ReleaseRunCards from './ReleaseRunCards.vue'
+import { safeHref } from '../../lib/safeHref'
 import type { ReleaseState } from '../../types/release'
 
 const props = defineProps<{ release: ReleaseState }>()
@@ -42,6 +46,11 @@ async function confirm() {
     await act(props.release.id, 'recut', props.release.head_sha)
   }
 }
+const retrySync = () => act(props.release.id, 'retry-sync', props.release.head_sha)
+const retryFinal = () => act(props.release.id, 'retry-release', props.release.head_sha)
+const syncFailed = computed(() => props.release.sync_state === 'failure')
+const STATE_CLS: Record<string, string> = { success: 'text-ok', failure: 'text-fail', running: 'text-warn', queued: 'text-text-muted', skipped: 'text-text-muted' }
+const STATE_TXT: Record<string, string> = { success: 'done', failure: 'failed', running: 'running', queued: 'queued', skipped: 'skipped' }
 const retry = () => act(props.release.id, 'recut', props.release.head_sha)
 
 type Line = { icon: string; cls: string; text: string }
@@ -107,7 +116,33 @@ const progress = computed<Line[]>(() => {
           <pre class="m-0 whitespace-pre-wrap font-mono text-[12px] text-text-secondary">{{ u.changelog }}</pre>
         </div>
       </details>
-      <!-- steps 3-5: Task 13 -->
+      <div v-if="release.step === 'sync'" data-testid="sync-step" class="flex flex-col gap-3">
+        <div v-if="!release.sync.length" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">Waiting for the sync to start</div>
+        <ReleaseRunCards :cards="release.sync" />
+        <div v-if="syncFailed && canAct" class="flex items-center gap-3">
+          <button type="button" data-testid="retry-sync" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retrySync">Retry sync</button>
+          <small class="text-text-muted">Or use "Update to latest main &amp; restart" above.</small>
+        </div>
+        <ReleaseRemovals v-if="release.sync_state === 'success'" :release="release" />
+      </div>
+
+      <ReleaseQaStep v-else-if="release.step === 'qa'" :release="release" />
+
+      <div v-else-if="release.step === 'releasing'" data-testid="final-step" class="flex flex-col gap-3">
+        <div class="text-text-primary"><b>PR #{{ release.pr }} merged</b></div>
+        <div v-if="release.final?.tags.length" data-testid="final-tags" class="flex flex-wrap gap-2">
+          <span v-for="t in release.final.tags" :key="t" class="rounded-md border border-border px-2 py-[2px] font-mono text-[12px] text-text-secondary">{{ t }}</span>
+        </div>
+        <ReleaseRunCards :cards="release.final?.instances ?? []" />
+        <div v-if="release.final" class="flex flex-col gap-1 text-[13px]">
+          <div data-testid="final-github-releases">Publish the GitHub releases: <span :class="STATE_CLS[release.final.github_releases]">{{ STATE_TXT[release.final.github_releases] ?? 'pending' }}</span></div>
+          <div data-testid="final-cleanup">Delete the pre-release: <span :class="STATE_CLS[release.final.cleanup]">{{ STATE_TXT[release.final.cleanup] ?? 'pending' }}</span></div>
+          <a v-if="safeHref(release.final.url)" :href="safeHref(release.final.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
+        </div>
+        <div v-if="release.final?.state === 'failure' && canAct">
+          <button type="button" data-testid="retry-final" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryFinal">Retry final sync</button>
+        </div>
+      </div>
     </template>
 
     <ReleaseConfirm v-if="dialog === 'abandon'" title="Abandon this release?" body="The release PR will be closed and the release branch deleted. The units become selectable again." confirm-label="Abandon release" danger @confirm="confirm" @cancel="dialog = null" />
