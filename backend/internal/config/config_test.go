@@ -481,3 +481,39 @@ func TestAuthEnabledValidation(t *testing.T) {
 		t.Fatalf("credentials not loaded: %+v", cfg.Auth)
 	}
 }
+
+func TestReleaseConfigDefaultsAndEnv(t *testing.T) {
+	t.Setenv("OBS_USERNAME", "u")
+	t.Setenv("RELEASE_GITHUB_TOKEN", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Release.GitHubRepo != "percona/obs-packaging" {
+		t.Errorf("GitHubRepo = %q, want percona/obs-packaging", cfg.Release.GitHubRepo)
+	}
+	if cfg.Release.Enabled() {
+		t.Error("release must be disabled without a token")
+	}
+
+	t.Setenv("RELEASE_GITHUB_TOKEN", "ghp_x")
+	t.Setenv("RELEASE_GITHUB_REPO", "example/fork")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Release.Enabled() {
+		t.Error("token from env must enable release")
+	}
+	if cfg.Release.GitHubToken != "ghp_x" || cfg.Release.GitHubRepo != "example/fork" {
+		t.Errorf("Release = %+v", cfg.Release)
+	}
+}
+
+func TestReleaseRepoValidation(t *testing.T) {
+	t.Setenv("OBS_USERNAME", "u")
+	t.Setenv("RELEASE_GITHUB_REPO", "not-a-repo")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "release.github_repo") {
+		t.Fatalf("expected release.github_repo error, got %v", err)
+	}
+}

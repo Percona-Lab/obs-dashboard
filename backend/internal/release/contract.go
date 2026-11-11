@@ -1,0 +1,49 @@
+// Package release drives the obs-packaging release workflows from the
+// dashboard. The names in this file are the contract with the obs-packaging
+// repository and must match it exactly.
+package release
+
+import (
+	"strconv"
+	"strings"
+)
+
+const (
+	WorkflowCut     = "obs-release-cut.yml"
+	WorkflowPR      = "obs-release-pr.yml"
+	WorkflowRelease = "obs-release.yml"
+	LabelSync       = "obs-sync"
+	LabelQA         = "qa-release"
+	BranchPrefix    = "release/"
+	UnitsPath       = "docs/versions/release-units.json"
+
+	JobPopulatePrefix = "Populate pre-release (" // + instance + ")"
+	JobCDNPrefix      = "Wait for download CDN ("
+	JobLanePrefix     = "Release / OBS QA / "
+	JobCopyPrefix     = "Release to OBS ("
+	JobFinalize       = "Publish GitHub releases and delete the pre-release"
+	JobDeletePrefix   = "Delete the pre-release ("
+
+	AnnotationJenkins    = "Jenkins build"        // message: "<release project> <url>"
+	ArtifactChangelogs   = "generated-changelogs" // one file changelogs.json: {"<unit root>": "<section>"}
+	ArtifactReportPrefix = "prerelease-report-"   // + instance; JSON list of {project, outcome, removals[]}
+)
+
+// CutRunName is the display name of the cut workflow run for branch.
+func CutRunName(branch string) string { return "Cut " + branch }
+
+// ReleaseRunName is the display name of the release workflow run for a PR.
+func ReleaseRunName(pr int) string { return "Release PR #" + strconv.Itoa(pr) }
+
+// InstanceOf returns the text between prefix and the closing ")" of a job
+// name, and whether name has that shape.
+func InstanceOf(name, prefix string) (string, bool) {
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ")") {
+		return "", false
+	}
+	inst := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ")")
+	if inst == "" {
+		return "", false
+	}
+	return inst, true
+}

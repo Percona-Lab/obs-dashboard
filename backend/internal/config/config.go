@@ -22,6 +22,7 @@ type Config struct {
 	Idle       IdleConfig
 	Auth       AuthConfig
 	Upgrades   UpgradesConfig
+	Release    ReleaseConfig
 	// Instances lists every OBS instance the dashboard reads from, in config
 	// order. Always at least one (the legacy instance when obs_instances is
 	// absent).
@@ -322,6 +323,7 @@ func Load() (*Config, error) {
 	v.SetDefault("auth.session_ttl", "168h")
 	v.SetDefault("upgrades.github_repo", "Percona-Lab/obs-dashboard")
 	v.SetDefault("upgrades.check_interval", "1h")
+	v.SetDefault("release.github_repo", "percona/obs-packaging")
 
 	// Config file (optional)
 	cfgFile := "config.yaml"
@@ -361,6 +363,8 @@ func Load() (*Config, error) {
 		{"auth.session_ttl", "AUTH_SESSION_TTL"},
 		{"upgrades.github_repo", "UPGRADES_GITHUB_REPO"},
 		{"upgrades.check_interval", "UPGRADES_CHECK_INTERVAL"},
+		{"release.github_token", "RELEASE_GITHUB_TOKEN"},
+		{"release.github_repo", "RELEASE_GITHUB_REPO"},
 	} {
 		_ = v.BindEnv(pair[0], pair[1])
 	}
@@ -465,6 +469,12 @@ func Load() (*Config, error) {
 	}
 	cfg.Upgrades = upgradesCfg
 
+	releaseCfg, err := loadRelease(v)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Release = releaseCfg
+
 	return cfg, nil
 }
 
@@ -507,5 +517,26 @@ func loadUpgrades(v *viper.Viper) (UpgradesConfig, error) {
 		CheckInterval:    interval,
 		ApplyDir:         strings.TrimSpace(os.Getenv("UPGRADE_APPLY_DIR")),
 		HostFilesVersion: strings.TrimSpace(os.Getenv("OBS_DASHBOARD_HOST_FILES_VERSION")),
+	}, nil
+}
+
+// ReleaseConfig configures the Release tab, which drives the obs-packaging
+// release workflows on GitHub. The feature is off without a token.
+type ReleaseConfig struct {
+	GitHubToken string // RELEASE_GITHUB_TOKEN: classic PAT with repo and workflow scopes
+	GitHubRepo  string // owner/name of the obs-packaging repository
+}
+
+// Enabled reports whether the Release tab is configured.
+func (r ReleaseConfig) Enabled() bool { return r.GitHubToken != "" }
+
+func loadRelease(v *viper.Viper) (ReleaseConfig, error) {
+	repo := strings.TrimSpace(v.GetString("release.github_repo"))
+	if !repoRe.MatchString(repo) {
+		return ReleaseConfig{}, fmt.Errorf("release.github_repo must be owner/name, got %q", repo)
+	}
+	return ReleaseConfig{
+		GitHubToken: strings.TrimSpace(v.GetString("release.github_token")),
+		GitHubRepo:  repo,
 	}, nil
 }
