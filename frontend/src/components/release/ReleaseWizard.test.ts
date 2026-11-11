@@ -91,4 +91,22 @@ describe('ReleaseWizard', () => {
     expect((d.element as HTMLDetailsElement).open).toBe(false)
     expect(d.text()).toContain('text')
   })
+
+  it('offers Retry final sync when the final sync failed', async () => {
+    const inst = { instance: 'obs-a', state: 'failure' as const, url: '', started_at: null, finished_at: null, cdn: '', failed_units: [], errors: [] }
+    const w = mountW({ step: 'releasing', final: { tags: ['t1'], instances: [inst], github_releases: 'skipped', cleanup: 'queued', state: 'failure', url: '' } })
+    expect(w.text()).toContain('PR #5 merged')
+    expect(w.text()).toContain('Publish the GitHub releases')
+    await w.get('[data-testid="retry-final"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'retry-release', 'abc')
+    expect(mountW({ step: 'releasing', final: { tags: [], instances: [], github_releases: '', cleanup: '', state: 'running', url: '' } }).find('[data-testid="retry-final"]').exists()).toBe(false)
+  })
+
+  it('shows waiting text and Retry sync in the sync step', async () => {
+    expect(mountW({ sync_state: 'queued' }).text()).toContain('Waiting for the sync to start')
+    const w = mountW({ sync_state: 'failure' })
+    await w.get('[data-testid="retry-sync"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'retry-sync', 'abc')
+    expect(mountW({ sync_state: 'success' }).text()).toContain('Nothing will be removed')
+  })
 })
