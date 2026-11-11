@@ -105,4 +105,48 @@ describe('useRelease', () => {
     expect(await useRelease().loadHistory(2)).toEqual([{ tag: 't' }])
     expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/api/release/history?page=2')
   })
+
+  // A fetch mock whose GET /releases calls stay pending until resolved by the test.
+  function pendingGets() {
+    const gets: ((s: unknown) => void)[] = []
+    const f = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Promise.resolve(json({ id: 'r9' }, 201))
+      return new Promise<Response>(res => { gets.push(s => res(json(s))) })
+    })
+    vi.stubGlobal('fetch', f)
+    const getCount = () => (f.mock.calls as unknown as [string, RequestInit?][])
+      .filter(c => c[0] === '/api/release/releases' && !c[1]?.method).length
+    return { gets, getCount }
+  }
+  const snapA = { ...snap, error: 'A' }
+  const snapB = { ...snap, error: 'B' }
+
+  it('an action refresh does not reuse a poll that started before the write', async () => {
+    const { gets, getCount } = pendingGets()
+    const r = useRelease()
+    void r.refresh() // poll in flight
+    await vi.advanceTimersByTimeAsync(0)
+    const done = r.cut(['u1'])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getCount()).toBe(2)
+    gets[0](snapA)
+    await vi.advanceTimersByTimeAsync(0)
+    gets[1](snapB)
+    await done
+    expect(r.snapshot.value?.error).toBe('B')
+  })
+
+  it('a late older refresh does not overwrite a newer snapshot', async () => {
+    const { gets } = pendingGets()
+    const r = useRelease()
+    void r.refresh()
+    await vi.advanceTimersByTimeAsync(0)
+    const done = r.cut(['u1'])
+    await vi.advanceTimersByTimeAsync(0)
+    gets[1](snapB)
+    await done
+    gets[0](snapA)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(r.snapshot.value?.error).toBe('B')
+  })
 })

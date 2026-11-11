@@ -30,21 +30,29 @@ async function loadStatus(): Promise<void> {
   }
 }
 
-function doRefresh(): Promise<void> {
-  // One request at a time: a refresh asked for mid-flight shares the running one.
-  refreshing ??= (async () => {
+let refreshSeq = 0
+
+// A plain refresh shares a running one. `fresh` (used after a write) always
+// starts a new GET, so the snapshot reflects the write. A response is applied
+// only if no newer refresh started since it was sent.
+function doRefresh(fresh = false): Promise<void> {
+  if (refreshing && !fresh) return refreshing
+  const mine = ++refreshSeq
+  const p = (async () => {
     try {
       const res = await fetch(`${BASE}/releases`)
       if (res.status === 401) { handleUnauthorized(); return }
       if (!res.ok) return
-      snapshot.value = (await res.json()) as Snapshot
+      const next = (await res.json()) as Snapshot
+      if (mine === refreshSeq) snapshot.value = next
     } catch {
       // Keep the last snapshot; the next poll retries.
     } finally {
-      refreshing = null
+      if (mine === refreshSeq) refreshing = null
     }
   })()
-  return refreshing
+  refreshing = p
+  return p
 }
 
 async function loadUnits(): Promise<void> {
@@ -79,7 +87,7 @@ async function send(method: string, path: string, body: unknown): Promise<Respon
     notice.value = 'Network error'
     return null
   } finally {
-    await doRefresh()
+    await doRefresh(true)
     busy.value = false
   }
 }
@@ -149,6 +157,7 @@ function stopPolling(): void {
 export function resetReleaseForTests(): void {
   stopPolling()
   refreshing = null
+  refreshSeq = 0
   enabled.value = false
   snapshot.value = null
   units.value = []
@@ -160,7 +169,7 @@ export function resetReleaseForTests(): void {
 export function useRelease() {
   return {
     enabled, snapshot, units, unitsError, notice, busy,
-    loadStatus, refresh: doRefresh, loadUnits,
+    loadStatus, refresh: () => doRefresh(), loadUnits,
     start, stopPolling,
     cut, saveChangelog, resetChangelog, act, loadHistory,
   }
