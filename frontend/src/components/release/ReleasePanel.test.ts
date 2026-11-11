@@ -22,6 +22,39 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('ReleasePanel', () => {
+  it('shows loading indicators until the releases, the units and the history have loaded', async () => {
+    let release!: (r: Response) => void
+    const pending = new Promise<Response>((res) => { release = res })
+    vi.stubGlobal('fetch', vi.fn(() => pending))
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    expect(w.get('[data-testid="in-flight"]').find('[data-testid="release-loading"]').text()).toContain('Loading releases')
+    expect(w.find('[data-testid="release-in-flight"]').exists()).toBe(false)
+    expect(w.get('[data-testid="new-release"]').find('[data-testid="release-loading"]').text()).toContain('Loading release units')
+    expect(w.get('[data-testid="history"]').find('[data-testid="release-loading"]').text()).toContain('Loading history')
+    expect(w.get('[data-testid="release-loading"]').attributes('role')).toBe('status')
+
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(json(url.includes('/history') ? { rows: [], more: false } : { units: [] }))))
+    release(json({ units: [] }))
+    useRelease().snapshot.value = snap([])
+    await flushPromises()
+    await useRelease().loadUnits()
+    await flushPromises()
+    expect(w.get('[data-testid="in-flight"]').find('[data-testid="release-loading"]').exists()).toBe(false)
+    expect(w.get('[data-testid="release-in-flight"]').text()).toContain('No releases in flight.')
+    expect(w.get('[data-testid="new-release"]').find('[data-testid="release-loading"]').exists()).toBe(false)
+  })
+
+  it('says so when the first load of the releases fails', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(url.endsWith('/releases') ? new Response('github request failed', { status: 502 }) : json(url.includes('/history') ? { rows: [], more: false } : { units: [] }))))
+    const w = mount(ReleasePanel)
+    await useRelease().refresh()
+    await flushPromises()
+    const box = w.get('[data-testid="in-flight"]')
+    expect(box.find('[data-testid="release-loading"]').exists()).toBe(false)
+    expect(box.get('[data-testid="release-load-error"]').text()).toContain('Could not load the releases')
+  })
+
   it('lists in-flight releases with unknown starter and opens the wizard placeholder', async () => {
     useRelease().snapshot.value = snap([rel()])
     const w = mount(ReleasePanel)
