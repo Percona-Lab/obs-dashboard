@@ -35,6 +35,8 @@ type fakeGitHub struct {
 	calls        []string
 	err          error
 	hasClosedErr error // returned by HasClosedPull only
+	deleteErr    error // returned by DeleteBranch only
+	closeErr     error // returned by ClosePull only
 	nextPR       int
 	block        chan struct{} // when non-nil, Branches waits for it to close
 	now          func() time.Time
@@ -202,6 +204,9 @@ func (f *fakeGitHub) ClosePull(ctx context.Context, number int) error {
 	if err != nil {
 		return err
 	}
+	if f.closeErr != nil {
+		return f.closeErr
+	}
 	if i := f.openIndex(number); i >= 0 {
 		f.open = append(f.open[:i], f.open[i+1:]...)
 	}
@@ -296,6 +301,9 @@ func (f *fakeGitHub) DeleteBranch(ctx context.Context, branch string) error {
 	defer f.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if f.deleteErr != nil {
+		return f.deleteErr
 	}
 	var keep []Ref
 	for _, b := range f.branches {
