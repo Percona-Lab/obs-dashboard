@@ -35,6 +35,12 @@ const PILL: Record<string, string> = {
   success: 'border-ok text-ok',
   failure: 'border-fail text-fail',
 }
+// One line per unit on the card: where it landed on this instance.
+const UNIT: Record<string, { icon: string; cls: string; text: string }> = {
+  success: { icon: '✓', cls: 'text-ok', text: 'synced' },
+  failure: { icon: '✗', cls: 'text-fail', text: 'failed' },
+  skipped: { icon: '–', cls: 'text-text-muted', text: 'not on this instance' },
+}
 const LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', success: 'Done', failure: 'Failed' }
 </script>
 
@@ -49,10 +55,14 @@ const LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', su
         <a v-if="safeHref(c.url)" :href="safeHref(c.url)" target="_blank" rel="noopener noreferrer" class="ml-auto text-[12px] text-brand-purple">View log on GitHub</a>
       </div>
       <div v-if="cdnNote(c)" data-testid="card-cdn" class="mt-1 text-[12px] text-warn">{{ cdnNote(c) }}</div>
-      <div v-if="c.nothing_to_sync" data-testid="card-nothing" class="mt-1 text-[12px] text-text-muted">This instance holds nothing of this release.</div>
-      <div v-else-if="c.skipped_units?.length" data-testid="card-skipped" class="mt-1 text-[12px] text-text-muted">Not on this instance: <span class="font-mono">{{ c.skipped_units.join(', ') }}</span></div>
+      <ul v-if="c.units?.length" data-testid="card-units" class="m-0 mt-2 flex list-none flex-col gap-[2px] p-0 text-[12px]">
+        <li v-for="u in c.units" :key="u.project" data-testid="card-unit" :data-outcome="u.outcome" class="flex flex-wrap items-center gap-x-2">
+          <span class="w-3 text-center" :class="UNIT[u.outcome]?.cls">{{ UNIT[u.outcome]?.icon }}</span>
+          <span class="font-mono text-text-secondary">{{ u.project }}</span>
+          <span :class="UNIT[u.outcome]?.cls">{{ UNIT[u.outcome]?.text }}</span>
+        </li>
+      </ul>
       <div v-if="c.state === 'failure'" data-testid="card-failure" class="mt-2 text-[12px]">
-        <div v-if="c.failed_units.length" class="text-fail">Failed units: <span class="font-mono">{{ c.failed_units.join(', ') }}</span></div>
         <ul v-if="c.errors.length" class="m-0 mt-1 list-disc pl-5 text-text-secondary">
           <li v-for="(e, i) in c.errors" :key="i">{{ e }}</li>
         </ul>

@@ -13,6 +13,10 @@ type Facts struct {
 	Annotations map[int64][]Annotation
 	ReleaseRun  *Run
 	ReleaseJobs []Job
+	// Unpopulated names the release projects that every instance skipped.
+	// Set once every populate job has reported; it turns a sync whose jobs
+	// all succeeded into a failure.
+	Unpopulated []string
 }
 
 // RunStateOf maps GitHub status and conclusion to a RunState.
@@ -198,7 +202,7 @@ func SyncCards(f Facts) (string, []InstanceCard, *Run) {
 		cards = append(cards, InstanceCard{
 			Instance: inst, State: jobState(j), URL: j.HTMLURL,
 			StartedAt: j.StartedAt, FinishedAt: j.CompletedAt,
-			FailedUnits: []string{}, Errors: []string{}, SkippedUnits: []string{},
+			Errors: []string{}, Units: []CardUnit{},
 		})
 	}
 	failed, allOK := false, true
@@ -235,6 +239,8 @@ func SyncCards(f Facts) (string, []InstanceCard, *Run) {
 	}
 	switch {
 	case failed:
+		return string(StateFailure), cards, run
+	case allOK && len(f.Unpopulated) > 0:
 		return string(StateFailure), cards, run
 	case allOK:
 		return string(StateSuccess), cards, run
@@ -355,7 +361,7 @@ func FinalStatus(f Facts) *Final {
 			fin.Instances = append(fin.Instances, InstanceCard{
 				Instance: inst, State: jobState(j), URL: j.HTMLURL,
 				StartedAt: j.StartedAt, FinishedAt: j.CompletedAt,
-				FailedUnits: []string{}, Errors: []string{}, SkippedUnits: []string{},
+				Errors: []string{}, Units: []CardUnit{},
 			})
 		} else if j.Name == JobFinalize {
 			if isSkipped(j) {

@@ -208,11 +208,21 @@ The editor is read-only once `obs-sync` is on the PR **(my call)**.
 
 One card per OBS instance (the populate matrix legs of `obs-release-pr.yml`):
 queued, running, done or failed, elapsed time, and a link to the job on
-GitHub **(user: option A)**. A failed card lists the units that failed (from
-the instance's populate report) and the job's error annotations. A report
-entry with the outcome `skipped` means the instance holds nothing of that
-project: it is not a failure. A card whose entries are all skipped shows
-"Nothing to sync"; a card with some skipped entries names them **(user)**.
+GitHub **(user: option A)**. Once its job has reported, each card lists
+every unit of the release with its outcome on that instance, from the
+populate report: synced, failed, or not on this instance **(user)**. A unit
+can live on one instance only; on the other its outcome is `skipped`, which
+means nothing was populated there. That is never a failure and never
+pending. A card whose units are all skipped shows "Nothing to sync". A failed
+card also shows the job's error annotations.
+
+A unit is populated when every instance reports `success` or `skipped` and at
+least one reports `success`. Once every instance has reported, a unit that
+all of them skipped makes the sync a failure, with the text "`<project>` was
+not populated on any instance", even though every job succeeded; QA cannot
+be approved and "Retry sync" is offered **(user)**. The dashboard never links
+a pre-release project, which does not exist on an instance that skipped the
+unit.
 
 When populate is done, the packages and subprojects that the release would
 delete from the release projects (the hop-2 dry-run result, from the

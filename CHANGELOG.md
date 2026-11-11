@@ -18,9 +18,12 @@ an example value. See `deploy/host/README.md`.
   and QA lanes that are queued or running, QA before its lanes exist, and a
   cut waiting for approval. The first cut stage now reads "Starting the cut
   on GitHub".
-- An OBS instance that holds nothing of a release (populate report outcome
-  `skipped`) shows "Nothing to sync" on its card. A skipped project is no
-  longer counted among the failed ones.
+- Each OBS instance card in the pre-release sync step lists every unit with
+  its outcome there: synced, failed, or not on this instance (populate report
+  outcome `skipped`). A card where every unit is skipped reads "Nothing to
+  sync". A skipped unit is no longer counted as failed.
+- A unit that every instance skipped was populated nowhere: the sync is shown
+  as failed, with the reason, and QA cannot be approved.
 
 - While a release is being cut, the Release tab names the units being cut
   (for example `ppg:staging:16:tde`) where it showed the internal timestamp id.
