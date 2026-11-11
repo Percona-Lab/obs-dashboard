@@ -34,11 +34,23 @@ describe('ReleaseWizard', () => {
     expect(mountW({ step: 'cutting', pr: 0, pr_url: '', head_sha: 'abc', cut: { state: 'failure', url: '' } }).find('[data-testid="abandon"]').exists()).toBe(true)
   })
 
-  it('hides retry for a hand-made release and abandon while the cut runs', () => {
+  it('hides retry for a hand-made release', () => {
     const w = mountW({ id: 'pr-7', step: 'cutting', cut: { state: 'failure', url: '' } })
     expect(w.find('[data-testid="retry-cut"]').exists()).toBe(false)
-    const r = mountW({ step: 'cutting', cut: { state: 'running', url: '' } })
-    expect(r.find('[data-testid="abandon"]').exists()).toBe(false)
+  })
+
+  it('shows abandon disabled, with the reason, while the cut is queued or running', async () => {
+    for (const state of ['queued', 'running'] as const) {
+      const w = mountW({ step: 'cutting', cut: { state, url: '' } })
+      const btn = w.get('[data-testid="abandon"]')
+      expect((btn.element as HTMLButtonElement).disabled).toBe(true)
+      expect(btn.attributes('title')).toBe('Wait for the cut to finish before abandoning.')
+      await btn.trigger('click')
+      expect(w.find('[data-testid="release-confirm"]').exists()).toBe(false)
+    }
+    const idle = mountW({ step: 'changelog' }).get('[data-testid="abandon"]')
+    expect((idle.element as HTMLButtonElement).disabled).toBe(false)
+    expect(idle.attributes('title')).toBeUndefined()
   })
 
   it('highlights Changelog for cutting and changelog', () => {
