@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import ReleaseUnitList from './ReleaseUnitList.vue'
 import ReleaseHistory from './ReleaseHistory.vue'
+import ReleaseWizard from './ReleaseWizard.vue'
 import type { ReleaseState, ReleaseStep } from '../../types/release'
 
 const { snapshot, units, unitsError, notice, busy, loadUnits, cut } = useRelease()
@@ -59,11 +60,7 @@ const when = (iso: string | null) => {
     </div>
 
     <!-- wizard: Task 12 -->
-    <div v-if="selected" data-testid="release-wizard" class="rounded-[14px] border border-border bg-bg-card p-5">
-      <button type="button" data-testid="release-back" class="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-brand-purple" @click="selectedId = null">← Back</button>
-      <div class="mt-2 font-mono text-text-primary">{{ selected.id }}</div>
-      <div class="text-text-muted">{{ stepLabel(selected) }}</div>
-    </div>
+    <ReleaseWizard v-if="selected" :release="selected" @back="selectedId = null" />
     <!-- /wizard -->
 
     <template v-else>
