@@ -103,7 +103,10 @@ func BuildUnitRows(defs []UnitDef, src PackageSource, inFlight map[string]string
 		case inFlight[d.Unit] != "":
 			id := inFlight[d.Unit]
 			row.Blocked = &Blocked{Reason: "in_flight", ReleaseID: id, Text: "Release " + id + " is already in progress."}
+		case row.Total == 0:
+			row.Blocked = &Blocked{Reason: "not_built", Text: "No packages found in staging."}
 		case len(notBuilt) > 0:
+			sort.Strings(notBuilt)
 			names := notBuilt
 			if len(names) > maxNotBuiltNames {
 				names = names[:maxNotBuiltNames]
