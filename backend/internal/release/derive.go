@@ -86,7 +86,7 @@ func DeriveStep(f Facts) Step {
 // headRuns returns the PR-workflow runs for the current head,
 // newest first.
 func headRuns(f Facts) []Run {
-	if f.Pull == nil {
+	if f.Pull == nil || f.Pull.HeadSHA == "" {
 		return nil
 	}
 	var out []Run
@@ -210,8 +210,8 @@ func QALanes(f Facts, units []UnitState, hasQALabel bool) QA {
 			if a.Title != AnnotationJenkins {
 				continue
 			}
-			parts := strings.SplitN(a.Message, " ", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			parts := strings.Fields(a.Message)
+			if len(parts) < 2 {
 				continue
 			}
 			l.Unit = unitFor(units, parts[0])
@@ -242,31 +242,54 @@ func unitFor(units []UnitState, project string) string {
 }
 
 // FinalStatus derives the releasing-phase status; nil while no release run
-// exists.
+// exists. Skipped jobs produce no card; a skipped finalize job reports
+// "skipped", as does cleanup when every cleanup job was skipped.
 func FinalStatus(f Facts) *Final {
 	if f.ReleaseRun == nil {
 		return nil
 	}
 	fin := &Final{
 		Tags: []string{}, Instances: []InstanceCard{},
-		State: RunStateOf(f.ReleaseRun.Status, f.ReleaseRun.Conclusion),
+		State: StateRunning,
 		URL:   f.ReleaseRun.HTMLURL,
 	}
+	copyFailed := false
 	var cleanup []Job
 	for _, j := range f.ReleaseJobs {
 		if inst, ok := InstanceOf(j.Name, JobCopyPrefix); ok {
+			if isSkipped(j) {
+				continue
+			}
+			if jobState(j) == StateFailure {
+				copyFailed = true
+			}
 			fin.Instances = append(fin.Instances, InstanceCard{
 				Instance: inst, State: jobState(j), URL: j.HTMLURL,
 				StartedAt: j.StartedAt, FinishedAt: j.CompletedAt,
 				FailedUnits: []string{}, Errors: []string{},
 			})
 		} else if j.Name == JobFinalize {
-			fin.GitHubReleases = string(jobState(j))
+			if isSkipped(j) {
+				fin.GitHubReleases = "skipped"
+			} else {
+				fin.GitHubReleases = string(jobState(j))
+			}
 		} else if _, ok := InstanceOf(j.Name, JobDeletePrefix); ok {
 			cleanup = append(cleanup, j)
 		}
 	}
 	fin.Cleanup = aggregate(cleanup)
+	run := f.ReleaseRun
+	switch {
+	case run.Status == "completed" && run.Conclusion != "success", copyFailed:
+		fin.State = StateFailure
+	case run.Status == "completed":
+		fin.State = StateSuccess
+	case run.Status == "in_progress":
+		fin.State = StateRunning
+	default:
+		fin.State = StateQueued
+	}
 	return fin
 }
 
@@ -275,10 +298,12 @@ func aggregate(jobs []Job) string {
 		return ""
 	}
 	out := StateSuccess
+	allSkipped := true
 	for _, j := range jobs {
 		if isSkipped(j) {
 			continue
 		}
+		allSkipped = false
 		switch jobState(j) {
 		case StateFailure:
 			return string(StateFailure)
@@ -289,6 +314,9 @@ func aggregate(jobs []Job) string {
 				out = StateQueued
 			}
 		}
+	}
+	if allSkipped {
+		return "skipped"
 	}
 	return string(out)
 }

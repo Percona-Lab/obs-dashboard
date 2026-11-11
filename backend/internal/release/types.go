@@ -61,7 +61,7 @@ type QA struct {
 type Final struct {
 	Tags           []string       `json:"tags"`
 	Instances      []InstanceCard `json:"instances"`
-	GitHubReleases string         `json:"github_releases"` // "" | queued | running | success | failure
+	GitHubReleases string         `json:"github_releases"` // "" | queued | running | success | failure | skipped
 	Cleanup        string         `json:"cleanup"`
 	State          RunState       `json:"state"`
 	URL            string         `json:"url"`

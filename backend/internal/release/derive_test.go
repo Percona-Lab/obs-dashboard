@@ -195,3 +195,135 @@ func TestFinalStatus(t *testing.T) {
 		t.Fatal("expected nil without release run")
 	}
 }
+
+func syncFacts(jobs ...Job) Facts {
+	return Facts{
+		Pull:     &Pull{HeadSHA: "h", Labels: []string{LabelSync}},
+		HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "in_progress"}},
+		Jobs:     map[int64][]Job{1: jobs},
+	}
+}
+
+func pj(inst, status, concl string) Job {
+	return Job{Name: "Populate pre-release (" + inst + ")", Status: status, Conclusion: concl}
+}
+
+func cj(inst, status, concl string) Job {
+	return Job{Name: "Wait for download CDN (" + inst + ")", Status: status, Conclusion: concl}
+}
+
+func TestSyncCardsGating(t *testing.T) {
+	tests := []struct {
+		name string
+		jobs []Job
+		want []string // acceptable states
+	}{
+		{"populate running", []Job{pj("isv", "in_progress", "")}, []string{"running"}},
+		{"populate queued", []Job{pj("isv", "queued", "")}, []string{"running", "queued"}},
+		{"populate cancelled", []Job{pj("isv", "completed", "cancelled")}, []string{"failure"}},
+		{"one populate running", []Job{pj("isv", "completed", "success"), pj("labs", "in_progress", "")}, []string{"running"}},
+		{"cdn queued", []Job{pj("isv", "completed", "success"), cj("isv", "queued", "")}, []string{"running", "queued"}},
+		{"cdn running", []Job{pj("isv", "completed", "success"), cj("isv", "in_progress", "")}, []string{"running"}},
+		{"cdn failure", []Job{pj("isv", "completed", "success"), cj("isv", "completed", "failure")}, []string{"failure"}},
+		{"cdn success", []Job{pj("isv", "completed", "success"), cj("isv", "completed", "success")}, []string{"success"}},
+		{"cdn skipped", []Job{pj("isv", "completed", "success"), cj("isv", "completed", "skipped")}, []string{"success"}},
+		{"mixed cdn", []Job{pj("isv", "completed", "success"), pj("labs", "completed", "success"), cj("isv", "completed", "success"), cj("labs", "completed", "skipped")}, []string{"success"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st, _, _ := SyncCards(syncFacts(tc.jobs...))
+			ok := false
+			for _, w := range tc.want {
+				ok = ok || st == w
+			}
+			if !ok {
+				t.Fatalf("got %s want one of %v", st, tc.want)
+			}
+		})
+	}
+}
+
+func TestDeriveStepSyncWithCDN(t *testing.T) {
+	f := syncFacts(pj("isv", "completed", "success"), cj("isv", "in_progress", ""))
+	if got := DeriveStep(f); got != StepSync {
+		t.Fatalf("cdn running: %s", got)
+	}
+	f = syncFacts(pj("isv", "completed", "success"), cj("isv", "completed", "success"))
+	if got := DeriveStep(f); got != StepQA {
+		t.Fatalf("cdn success: %s", got)
+	}
+}
+
+func TestQALanesSkippedAndCancelled(t *testing.T) {
+	f := qaFacts()
+	f.Jobs[1] = []Job{
+		{ID: 10, Name: "Release / OBS QA / packages / a", Status: "completed", Conclusion: "skipped"},
+		{ID: 11, Name: "Release / OBS QA / packages / b", Status: "completed", Conclusion: "cancelled"},
+	}
+	q := QALanes(f, nil, true)
+	if len(q.Lanes) != 1 || q.Lanes[0].Name != "packages / b" || q.Lanes[0].State != StateFailure {
+		t.Fatalf("%+v", q)
+	}
+}
+
+func TestFinalStatusSkippedJobs(t *testing.T) {
+	f := Facts{
+		Pull:       &Pull{},
+		ReleaseRun: &Run{Status: "completed", Conclusion: "success"},
+		ReleaseJobs: []Job{
+			{Name: "Release to OBS (isv)", Status: "completed", Conclusion: "success"},
+			{Name: "Release to OBS (labs)", Status: "completed", Conclusion: "skipped"},
+			{Name: JobFinalize, Status: "completed", Conclusion: "skipped"},
+			{Name: "Delete the pre-release (isv)", Status: "completed", Conclusion: "skipped"},
+			{Name: "Delete the pre-release (labs)", Status: "completed", Conclusion: "skipped"},
+		},
+	}
+	fin := FinalStatus(f)
+	if len(fin.Instances) != 1 || fin.Instances[0].Instance != "isv" {
+		t.Fatalf("instances %+v", fin.Instances)
+	}
+	if fin.GitHubReleases != "skipped" || fin.Cleanup != "skipped" || fin.State != StateSuccess {
+		t.Fatalf("%+v", fin)
+	}
+	f.ReleaseRun = &Run{Status: "in_progress"}
+	if s := FinalStatus(f).State; s != StateRunning {
+		t.Fatalf("in progress: %s", s)
+	}
+	f.ReleaseRun = &Run{Status: "queued"}
+	if s := FinalStatus(f).State; s != StateQueued {
+		t.Fatalf("queued: %s", s)
+	}
+	f.ReleaseRun = &Run{Status: "completed", Conclusion: "cancelled"}
+	if s := FinalStatus(f).State; s != StateFailure {
+		t.Fatalf("cancelled: %s", s)
+	}
+	f.ReleaseRun = &Run{Status: "in_progress"}
+	f.ReleaseJobs = []Job{{Name: "Release to OBS (isv)", Status: "completed", Conclusion: "failure"}}
+	if s := FinalStatus(f).State; s != StateFailure {
+		t.Fatalf("copy failed: %s", s)
+	}
+}
+
+func TestDeriveEmptyHeadSHA(t *testing.T) {
+	f := Facts{
+		Pull:     &Pull{HeadSHA: "", Labels: []string{LabelSync}},
+		HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "", Status: "completed", Conclusion: "success"}},
+		Jobs:     map[int64][]Job{1: {pj("isv", "completed", "success")}},
+	}
+	if _, _, run := SyncCards(f); run != nil {
+		t.Fatalf("sync run found %+v", run)
+	}
+	if got := DeriveStep(f); got != StepSync {
+		t.Fatalf("step %s", got)
+	}
+}
+
+func TestQALaneAnnotationTrimmed(t *testing.T) {
+	f := qaFacts()
+	f.Annotations[10][0].Message = "ppg:releases:18 https://j/job/1/\n"
+	units := []UnitState{{Unit: "u", ReleaseProject: "ppg:releases:18"}}
+	l := QALanes(f, units, true).Lanes[0]
+	if l.JenkinsURL != "https://j/job/1/" || l.Unit != "u" {
+		t.Fatalf("%+v", l)
+	}
+}
