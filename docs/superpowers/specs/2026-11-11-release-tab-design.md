@@ -146,8 +146,12 @@ after 90 seconds the tab returns to the landing view with a notice
 
 ### 4.3 Step 2: changelog
 
-While the cut runs, a short progress list (branch created, generating,
-opening PR). The cut does not open the PR; the dashboard opens it, without
+While the cut runs, a short progress list (starting the cut on GitHub,
+generating release files and changelogs, opening the release PR), with a
+spinner on the stage in progress. Throughout the wizard, anything being
+waited for shows a spinner: a queued or running instance or QA lane, the
+sync, QA and the final sync before they start, and a cut held for approval
+**(user)**. The cut does not open the PR; the dashboard opens it, without
 labels, once the cut run has succeeded and every unit has a release id and a
 changelog section. It is opened at most once per branch: a branch whose PR
 someone closed is left alone and not listed **(review)**.

@@ -21,6 +21,19 @@ const mountQ = (qa: QAIn, o: Partial<ReleaseState> = {}) => mount(ReleaseQaStep,
 beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
 
 describe('ReleaseQaStep', () => {
+  it('spins on lanes that have not finished and while QA has not produced lanes yet', () => {
+    const w = mountQ({ state: 'running', lanes: [lane({ name: 'a', state: 'running' }), lane({ name: 'b', state: 'queued' }), lane({ name: 'c', state: 'success' })] })
+    expect(w.findAll('[data-testid="lane-running"] [data-testid="spinner"]')).toHaveLength(2)
+    expect(w.find('[data-testid="qa-starting"]').exists()).toBe(false)
+
+    const starting = mountQ({ state: 'running', lanes: [] })
+    expect(starting.get('[data-testid="qa-starting"]').text()).toContain('Waiting for QA to start')
+    expect(starting.find('[data-testid="qa-starting"] [data-testid="spinner"]').exists()).toBe(true)
+
+    const done = mountQ({ state: 'finished', lanes: [lane({ name: 'c', state: 'success' })] })
+    expect(done.find('[data-testid="spinner"]').exists()).toBe(false)
+  })
+
   it('links failed lanes to Jenkins and falls back to the GitHub job', () => {
     const w = mountQ({ state: 'finished', lanes: [
       lane({ name: 'a', state: 'failure', jenkins_url: 'https://jenkins/job/a' }),

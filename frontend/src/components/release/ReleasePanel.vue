@@ -5,6 +5,7 @@ import ReleaseUnitList from './ReleaseUnitList.vue'
 import ReleaseHistory from './ReleaseHistory.vue'
 import ReleaseWizard from './ReleaseWizard.vue'
 import ReleaseLoading from './ReleaseLoading.vue'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 import { safeHref } from '../../lib/safeHref'
 import type { ReleaseState, ReleaseStep } from '../../types/release'
 
@@ -92,7 +93,7 @@ const when = (iso: string | null) => {
     <!-- /wizard -->
     <section v-else-if="selectedId && selectedId === pendingId" data-testid="release-starting" class="rounded-[14px] border border-border bg-bg-card p-5">
       <button type="button" class="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-brand-purple" @click="leaveStarting">← Back</button>
-      <p class="m-0 mt-3 text-text-primary">Starting the cut…</p>
+      <p role="status" class="m-0 mt-3 flex items-center gap-2 text-text-primary"><ReleaseSpinner /><span>Starting the cut…</span></p>
     </section>
 
     <template v-else>
