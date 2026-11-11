@@ -12,6 +12,8 @@ const { act, busy } = useRelease()
 const qa = computed(() => props.release.qa)
 const lanes = computed(() => qa.value?.lanes ?? [])
 const failed = computed(() => lanes.value.filter((l) => l.state === 'failure'))
+// Lanes that are neither passed nor failed while QA is finished should not happen; treat them like failures.
+const unfinished = computed(() => qa.value?.state === 'finished' ? lanes.value.filter((l) => l.state !== 'success' && l.state !== 'failure') : [])
 const passed = computed(() => lanes.value.filter((l) => l.state === 'success'))
 const running = computed(() => lanes.value.filter((l) => l.state === 'queued' || l.state === 'running'))
 const canAct = computed(() => props.release.dashboard)
@@ -43,14 +45,20 @@ function link(l: Lane): { text: string; href: string | undefined } {
 
 // Pins the release id, head and failed-lane state the user saw when the dialog opened.
 const dialog = ref<{ id: string; head: string; confirmFailed: boolean } | null>(null)
-const openRelease = () => { dialog.value = { id: props.release.id, head: props.release.head_sha, confirmFailed: failed.value.length > 0 } }
-const releaseBody = computed(() => failed.value.length
-  ? `These QA lanes failed: ${failed.value.map((l) => l.name).join(', ')}. The release merges the PR and cannot be undone.`
-  : 'This merges the release PR and cannot be undone.')
+const hasBad = computed(() => failed.value.length > 0 || unfinished.value.length > 0)
+const openRelease = () => { dialog.value = { id: props.release.id, head: props.release.head_sha, confirmFailed: hasBad.value } }
+const releaseBody = computed(() => {
+  const parts: string[] = []
+  if (failed.value.length) parts.push(`These QA lanes failed: ${failed.value.map((l) => l.name).join(', ')}.`)
+  if (unfinished.value.length) parts.push(`These QA lanes did not finish: ${unfinished.value.map((l) => l.name).join(', ')}.`)
+  parts.push(parts.length ? 'The release merges the PR and cannot be undone.' : 'This merges the release PR and cannot be undone.')
+  return parts.join(' ')
+})
 async function doRelease() {
   const d = dialog.value
   dialog.value = null
-  if (d) await act(d.id, 'release', d.head, d.confirmFailed)
+  // QA may have gone back to running while the dialog was open.
+  if (d && qa.value?.state === 'finished') await act(d.id, 'release', d.head, d.confirmFailed)
 }
 const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha)
 </script>
@@ -102,6 +110,6 @@ const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha
       </div>
     </template>
 
-    <ReleaseConfirm v-if="dialog" :title="failed.length ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="failed.length ? 'Release anyway' : 'Release'" :danger="failed.length > 0" @confirm="doRelease" @cancel="dialog = null" />
+    <ReleaseConfirm v-if="dialog" :title="hasBad ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="hasBad ? 'Release anyway' : 'Release'" :danger="hasBad" @confirm="doRelease" @cancel="dialog = null" />
   </div>
 </template>

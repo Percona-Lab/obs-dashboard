@@ -120,7 +120,11 @@ const progress = computed<Line[]>(() => {
         </div>
       </details>
       <div v-if="release.step === 'sync'" data-testid="sync-step" class="flex flex-col gap-3">
-        <div v-if="!release.sync.length" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">Waiting for the sync to start</div>
+        <template v-if="!release.sync.length">
+          <div v-if="release.sync_state === 'failure'" data-testid="sync-failed" class="rounded-[10px] border border-fail p-3 text-fail">The pre-release sync failed before any instance reported. Open the run on GitHub for details.</div>
+          <div v-else-if="release.sync_state === 'running'" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">The sync is starting…</div>
+          <div v-else-if="release.sync_state === 'queued' || !release.sync_state" data-testid="sync-waiting" class="rounded-[10px] border border-border p-3 text-text-secondary">Waiting for the sync to start</div>
+        </template>
         <ReleaseRunCards :cards="release.sync" />
         <div v-if="syncFailed && canAct" class="flex items-center gap-3">
           <button type="button" data-testid="retry-sync" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retrySync">Retry sync</button>
@@ -142,6 +146,7 @@ const progress = computed<Line[]>(() => {
           <div data-testid="final-cleanup">Delete the pre-release: <span :class="STATE_CLS[release.final.cleanup]">{{ STATE_TXT[release.final.cleanup] ?? 'pending' }}</span></div>
           <a v-if="safeHref(release.final.url)" :href="safeHref(release.final.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
         </div>
+        <div v-if="release.final?.state === 'failure'" data-testid="final-failed" class="text-fail">The final sync failed.</div>
         <div v-if="release.final?.state === 'failure' && canAct">
           <button type="button" data-testid="retry-final" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryFinal">Retry final sync</button>
         </div>

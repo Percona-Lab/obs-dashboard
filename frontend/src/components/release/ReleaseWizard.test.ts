@@ -117,4 +117,17 @@ describe('ReleaseWizard', () => {
     expect(act).toHaveBeenCalledWith('r1', 'retry-sync', 'abc')
     expect(mountW({ sync_state: 'success' }).text()).toContain('Nothing will be removed')
   })
+
+  it('a failed sync with no cards says it failed, not waiting', () => {
+    const w = mountW({ sync_state: 'failure' })
+    expect(w.text()).not.toContain('Waiting for the sync to start')
+    expect(w.text()).toContain('The pre-release sync failed before any instance reported')
+    expect(w.find('[data-testid="retry-sync"]').exists()).toBe(true)
+    expect(mountW({ sync_state: 'running' }).text()).toContain('The sync is starting')
+  })
+
+  it('the final view says so when the final sync failed', () => {
+    const w = mountW({ step: 'releasing', final: { tags: [], instances: [], github_releases: '', cleanup: '', state: 'failure', url: '' } })
+    expect(w.text()).toContain('The final sync failed.')
+  })
 })

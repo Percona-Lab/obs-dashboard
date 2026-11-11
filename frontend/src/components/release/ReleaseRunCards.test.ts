@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ReleaseRunCards from './ReleaseRunCards.vue'
 import type { InstanceCard } from '../../types/release'
@@ -23,4 +23,27 @@ describe('ReleaseRunCards', () => {
     expect(w.get('[data-testid="card-elapsed"]').text()).toBe('12 min')
     expect(w.find('a').exists()).toBe(false)
   })
+
+  it('the timer runs only while a card is queued or running', async () => {
+    vi.useFakeTimers()
+    try {
+      const w = mount(ReleaseRunCards, { props: { cards: [card({ state: 'success' }), card({ state: 'failure' })] } })
+      expect(vi.getTimerCount()).toBe(0)
+      await w.setProps({ cards: [card({ state: 'running' })] })
+      expect(vi.getTimerCount()).toBe(1)
+      await w.setProps({ cards: [card({ state: 'success' })] })
+      expect(vi.getTimerCount()).toBe(0)
+      w.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('shows the download server state when it is not done', () => {
+    const w = mount(ReleaseRunCards, { props: { cards: [card({ state: 'success', cdn: 'failure' }), card({ instance: 'b', state: 'success', cdn: 'success' }), card({ instance: 'c', state: 'success', cdn: 'skipped' })] } })
+    const t = w.findAll('[data-testid="run-card"]').map((c) => c.text())
+    expect(t[0]).toContain('Download servers: failure')
+    expect(t[1]).not.toContain('Download servers')
+    expect(t[2]).not.toContain('Download servers')
+  })
 })
+
+afterEach(() => { vi.useRealTimers() })
