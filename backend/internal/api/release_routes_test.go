@@ -89,7 +89,7 @@ func releaseRouter(t *testing.T, rel ReleaseService) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	obsClient := obs.SingleFleet(obs.NewClient(stubOBSServer(t).URL, "user", "pass"), "isv:percona")
-	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, rel), sid
+	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, rel, nil), sid
 }
 
 func relCall(h http.Handler, method, path, body, origin, sid string) *httptest.ResponseRecorder {
