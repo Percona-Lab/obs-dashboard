@@ -495,3 +495,66 @@ func TestDeriveIgnoresActionRequiredRuns(t *testing.T) {
 		t.Fatalf("sync next to an action_required run = %q %+v", st, run)
 	}
 }
+
+// The jobs of the real QA run of a unit that declares no QA lane: the wait
+// for the download servers and the matrix detection succeed, the matrix is
+// empty, and the only lane job is skipped under its unexpanded name.
+func noLaneQAJobs() []Job {
+	ok := func(id int64, name string) Job {
+		return Job{ID: id, Name: name, Status: "completed", Conclusion: "success"}
+	}
+	skip := func(id int64, name string) Job {
+		return Job{ID: id, Name: name, Status: "completed", Conclusion: "skipped"}
+	}
+	return []Job{
+		ok(1, "Resolve release PR"),
+		ok(2, "Wait for download CDN (boo)"),
+		ok(3, "Wait for download CDN (labs)"),
+		skip(4, "Populate pre-release (${{ matrix.instance.name }})"),
+		ok(5, "Release / Detect QA matrix (boo)"),
+		ok(6, "Release / Detect QA matrix (labs)"),
+		ok(7, "Release / Merge QA matrix"),
+		skip(8, "Release / matrix.status_context"),
+	}
+}
+
+// QA that ran and found nothing to run has finished, with no lanes.
+func TestQALanesFinishedWithNoLanes(t *testing.T) {
+	f := Facts{
+		Pull:     &Pull{HeadSHA: "h"},
+		HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "completed", Conclusion: "success", HTMLURL: "run"}},
+		Jobs:     map[int64][]Job{1: noLaneQAJobs()},
+	}
+	q := QALanes(f, nil, true)
+	if q.State != "finished" || len(q.Lanes) != 0 || q.Lanes == nil || q.Error != "" || q.URL != "run" {
+		t.Fatalf("QA = %+v, want finished with no lanes", q)
+	}
+}
+
+// While that run is still going, QA is running: the lanes may yet appear.
+func TestQALanesNoLanesYetIsRunning(t *testing.T) {
+	jobs := noLaneQAJobs()[:3]
+	f := Facts{
+		Pull:     &Pull{HeadSHA: "h"},
+		HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "in_progress", HTMLURL: "run"}},
+		Jobs:     map[int64][]Job{1: jobs},
+	}
+	if q := QALanes(f, nil, true); q.State != "running" {
+		t.Fatalf("QA = %+v, want running", q)
+	}
+}
+
+// A successful run in which the QA fan-out never ran (only the wait for the
+// download servers did) is not a finished QA.
+func TestQALanesSuccessWithoutFanOutIsNotFinished(t *testing.T) {
+	jobs := noLaneQAJobs()[:3]
+	jobs = append(jobs, Job{ID: 9, Name: "Release", Status: "completed", Conclusion: "skipped"})
+	f := Facts{
+		Pull:     &Pull{HeadSHA: "h"},
+		HeadRuns: []Run{{ID: 1, WorkflowFile: WorkflowPR, HeadSHA: "h", Status: "completed", Conclusion: "success", HTMLURL: "run"}},
+		Jobs:     map[int64][]Job{1: jobs},
+	}
+	if q := QALanes(f, nil, true); q.State == "finished" {
+		t.Fatalf("QA = %+v, must not be finished when the fan-out was skipped", q)
+	}
+}

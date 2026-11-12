@@ -21,6 +21,20 @@ const mountQ = (qa: QAIn, o: Partial<ReleaseState> = {}) => mount(ReleaseQaStep,
 beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
 
 describe('ReleaseQaStep', () => {
+  it('says there are no QA tests when QA finished without a single lane, and lets the user release', async () => {
+    const w = mountQ({ state: 'finished', lanes: [] })
+    expect(w.get('[data-testid="qa-none"]').text()).toContain('No QA tests are defined for this release')
+    expect(w.find('[data-testid="qa-counts"]').exists()).toBe(false)
+    expect(w.find('[data-testid="qa-starting"]').exists()).toBe(false)
+    expect(w.find('[data-testid="spinner"]').exists()).toBe(false)
+    const btn = w.get('[data-testid="release"]')
+    expect((btn.element as HTMLButtonElement).disabled).toBe(false)
+    await btn.trigger('click')
+    expect(w.get('[data-testid="release-confirm"]').text()).toContain('No QA tests ran for this release.')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', false)
+  })
+
   it('spins on lanes that have not finished and while QA has not produced lanes yet', () => {
     const w = mountQ({ state: 'running', lanes: [lane({ name: 'a', state: 'running' }), lane({ name: 'b', state: 'queued' }), lane({ name: 'c', state: 'success' })] })
     expect(w.findAll('[data-testid="lane-running"] [data-testid="spinner"]')).toHaveLength(2)

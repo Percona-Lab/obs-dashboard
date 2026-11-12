@@ -121,6 +121,7 @@ const status = computed<Status>(() => {
       if (!q || q.state === 'waiting') return act('approve the QA run')
       if (q.state === 'failure') return fail('QA could not start')
       if (q.state === 'running') return wait('QA is running')
+      if (!q.lanes.length) return act('this release has no QA tests, release when ready')
       const bad = q.lanes.filter((l) => l.state !== 'success').length
       return bad ? act(`QA finished with ${bad} failed ${bad === 1 ? 'lane' : 'lanes'}, review before releasing`) : act('QA passed, release when ready')
     }

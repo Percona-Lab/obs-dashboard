@@ -11,6 +11,12 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release tab waiting for QA forever when a release has no QA tests. A QA run
+  that finishes without a single lane now counts as finished: the QA step
+  says that no tests are defined and lets you release.
+
 ## [0.2.2] - 2026-11-12
 
 ### Changed

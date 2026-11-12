@@ -134,6 +134,7 @@ describe('ReleaseWizard', () => {
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('running') })).toBe('waiting|Step 4 of 5 · QA|QA is running')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('failure') })).toBe('failed|Step 4 of 5 · QA|QA could not start')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('finished', [lane('success')]) })).toBe('action|Step 4 of 5 · QA|Your turn: QA passed, release when ready')
+    expect(status({ step: 'qa', sync_state: 'success', qa: qa('finished', []) })).toBe('action|Step 4 of 5 · QA|Your turn: this release has no QA tests, release when ready')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('finished', [lane('failure'), lane('success')]) })).toBe('action|Step 4 of 5 · QA|Your turn: QA finished with 1 failed lane, review before releasing')
     expect(status({ step: 'releasing', final: null })).toBe('waiting|Step 5 of 5 · Release|Copying the pre-release into the release projects')
     expect(status({ step: 'releasing', final: { tags: [], instances: [], github_releases: '', cleanup: '', state: 'failure', url: '' } })).toBe('failed|Step 5 of 5 · Release|The final sync failed')
