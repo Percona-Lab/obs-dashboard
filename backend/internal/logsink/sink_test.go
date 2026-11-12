@@ -150,7 +150,10 @@ func TestTailSpansBothFiles(t *testing.T) {
 
 func TestSubscribeHasNoGapOrDuplicate(t *testing.T) {
 	s, _, _ := newOpened(t, 0)
-	const total = 2000
+	// At most 200 lines are written after Subscribe, fewer than the 256 a
+	// subscriber's channel holds, so no line is dropped however slowly the
+	// reader below runs.
+	const total = 700
 	started := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -167,7 +170,7 @@ func TestSubscribeHasNoGapOrDuplicate(t *testing.T) {
 	var got []string
 	got = append(got, tail...)
 	drained := make(chan struct{})
-	go func() { // drain concurrently so the 256-line channel never fills
+	go func() {
 		defer close(drained)
 		for l := range ch {
 			got = append(got, l)
