@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-12
+
 ### Added
 
 - Settings has a "Server log" tab that shows the backend's log live, for signed-in users.
