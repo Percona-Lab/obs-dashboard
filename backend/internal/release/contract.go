@@ -15,7 +15,10 @@ const (
 	LabelSync       = "obs-sync"
 	LabelQA         = "qa-release"
 	BranchPrefix    = "release/"
-	UnitsPath       = "docs/versions/release-units.json"
+	// ActorActions is the actor of what a workflow does with its own token:
+	// the cut pushes the release branch as it.
+	ActorActions = "github-actions[bot]"
+	UnitsPath    = "docs/versions/release-units.json"
 
 	JobPopulatePrefix = "Populate pre-release (" // + instance + ")"
 	JobCDNPrefix      = "Wait for download CDN ("

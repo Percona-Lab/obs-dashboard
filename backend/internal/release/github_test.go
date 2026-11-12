@@ -522,3 +522,26 @@ func TestGitHubETagCacheBounded(t *testing.T) {
 		t.Error("the oldest unused entry was kept")
 	}
 }
+
+func TestGitHubRunActorAndApprove(t *testing.T) {
+	var approved string
+	mux := http.NewServeMux()
+	base := "/repos/percona/obs-packaging/"
+	mux.HandleFunc(base+"actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"workflow_runs":[{"id":7,"event":"pull_request","actor":{"login":"github-actions[bot]"},"conclusion":"action_required"}]}`)
+	})
+	mux.HandleFunc(base+"actions/runs/7/approve", func(w http.ResponseWriter, r *http.Request) {
+		approved = r.Method
+		w.WriteHeader(201)
+		fmt.Fprint(w, `{}`)
+	})
+	c := newGHClient(t, mux)
+	ctx := context.Background()
+	runs, err := c.RunsForSHA(ctx, "h")
+	if err != nil || len(runs) != 1 || runs[0].Actor != ActorActions {
+		t.Fatalf("runs %+v %v", runs, err)
+	}
+	if err := c.ApproveRun(ctx, 7); err != nil || approved != http.MethodPost {
+		t.Fatalf("approve %q %v", approved, err)
+	}
+}

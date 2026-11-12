@@ -38,6 +38,7 @@ type fakeGitHub struct {
 	deleteErr    error            // returned by DeleteBranch only
 	closeErr     error            // returned by ClosePull only
 	createErr    error            // returned by CreatePull only
+	approveErr   error            // returned by ApproveRun only
 	fileErrs     map[string]error // "ref:path" -> error File returns for it
 	nextPR       int
 	block        chan struct{} // when non-nil, Branches waits for it to close
@@ -382,6 +383,25 @@ func (f *fakeGitHub) Dispatch(ctx context.Context, workflow string, inputs map[s
 	err := f.record("Dispatch", args...)
 	defer f.mu.Unlock()
 	return err
+}
+
+// ApproveRun starts a held run, as GitHub does.
+func (f *fakeGitHub) ApproveRun(ctx context.Context, runID int64) error {
+	err := f.record("ApproveRun", runID)
+	defer f.mu.Unlock()
+	if err == nil {
+		err = f.approveErr
+	}
+	if err != nil {
+		return err
+	}
+	for i := range f.runs {
+		if f.runs[i].ID == runID {
+			f.runs[i].Status, f.runs[i].Conclusion = "queued", ""
+			f.runs[i].Attempt++
+		}
+	}
+	return nil
 }
 
 func (f *fakeGitHub) WorkflowRuns(ctx context.Context, workflow string, limit int) ([]Run, error) {

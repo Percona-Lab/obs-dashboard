@@ -60,6 +60,7 @@ type Run struct {
 	ID                                                              int64
 	Attempt                                                         int // a re-run keeps the id and counts up
 	Name, WorkflowFile, Event, HeadSHA, Status, Conclusion, HTMLURL string
+	Actor                                                           string // login of whoever caused the run
 	CreatedAt                                                       time.Time
 }
 
@@ -93,6 +94,7 @@ type GitHub interface {
 	File(ctx context.Context, path, ref string) ([]byte, error)
 	AmendFile(ctx context.Context, branch, expectHead, path string, content []byte) (string, error)
 	Dispatch(ctx context.Context, workflow string, inputs map[string]string) error
+	ApproveRun(ctx context.Context, runID int64) error
 	WorkflowRuns(ctx context.Context, workflow string, limit int) ([]Run, error)
 	RunsForSHA(ctx context.Context, sha string) ([]Run, error)
 	Jobs(ctx context.Context, runID int64) ([]Job, error)
@@ -647,6 +649,13 @@ func (c *Client) Dispatch(ctx context.Context, workflow string, inputs map[strin
 	return err
 }
 
+// ApproveRun starts a run GitHub holds for approval (conclusion
+// action_required), as "Approve workflows to run" on the pull request does.
+func (c *Client) ApproveRun(ctx context.Context, runID int64) error {
+	_, _, err := c.do(ctx, http.MethodPost, c.repoPath("actions/runs/"+strconv.FormatInt(runID, 10)+"/approve"), nil, false)
+	return err
+}
+
 type ghRun struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`
@@ -659,6 +668,9 @@ type ghRun struct {
 	HTMLURL      string    `json:"html_url"`
 	CreatedAt    time.Time `json:"created_at"`
 	RunAttempt   int       `json:"run_attempt"`
+	Actor        struct {
+		Login string `json:"login"`
+	} `json:"actor"`
 }
 
 func (g ghRun) run() Run {
@@ -668,7 +680,7 @@ func (g ghRun) run() Run {
 	}
 	return Run{
 		ID: g.ID, Attempt: g.RunAttempt, Name: name, WorkflowFile: path.Base(g.Path), Event: g.Event, HeadSHA: g.HeadSHA,
-		Status: g.Status, Conclusion: g.Conclusion, HTMLURL: g.HTMLURL, CreatedAt: g.CreatedAt,
+		Status: g.Status, Conclusion: g.Conclusion, HTMLURL: g.HTMLURL, Actor: g.Actor.Login, CreatedAt: g.CreatedAt,
 	}
 }
 
