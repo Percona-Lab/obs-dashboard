@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-12
+
 ### Fixed
 
 - Release tab stuck on "Opening the release PR" for a release of several
