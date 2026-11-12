@@ -182,6 +182,13 @@ current step highlighted) and, below it, a status line: "Step N of 5 ·
 waiting on GitHub (with a spinner), "Your turn" when the user has to act
 (review the changelog, approve QA, release), and failed **(user)**.
 
+A button that was clicked shows a spinner, and every button stays disabled,
+until the release has changed on screen. GitHub can take a few seconds to
+show the effect of an action (the new run after a retry): the view then
+refreshes every 3 seconds until the release looks different, for at most 90
+seconds, after which it says that GitHub has not shown a change yet
+**(user)**.
+
 Once the PR exists:
 
 - A release strip: units, PR number, who started it and when, "Abandon

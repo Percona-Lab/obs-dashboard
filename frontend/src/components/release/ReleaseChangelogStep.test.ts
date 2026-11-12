@@ -9,8 +9,9 @@ import type { ReleaseState } from '../../types/release'
 const saveChangelog = vi.fn(() => Promise.resolve(true))
 const resetChangelog = vi.fn(() => Promise.resolve(true))
 const act = vi.fn(() => Promise.resolve(true))
+const pending = ref('')
 vi.mock('../../composables/useRelease', () => ({
-  useRelease: () => ({ saveChangelog, resetChangelog, act, busy: ref(false) }),
+  useRelease: () => ({ saveChangelog, resetChangelog, act, busy: ref(false), pending }),
 }))
 
 const rel = (o: Partial<ReleaseState> = {}, changelog = 'orig', generated: string | null = 'gen'): ReleaseState => ({

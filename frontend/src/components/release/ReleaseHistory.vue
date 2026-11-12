@@ -4,6 +4,7 @@ import { useRelease } from '../../composables/useRelease'
 import { parseChangelog, segments, type PreviewNode } from '../../lib/changelogPreview'
 import { safeHref } from '../../lib/safeHref'
 import ReleaseLoading from './ReleaseLoading.vue'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 import type { HistoryRow } from '../../types/release'
 
 const { loadHistory } = useRelease()
@@ -87,7 +88,8 @@ const segs = (n: PreviewNode) => segments(n).map((s, id) => ({ ...s, id }))
       type="button"
       class="cursor-pointer self-start rounded-[8px] border border-border bg-bg-card px-3 py-[6px] text-[12px] font-semibold text-text-secondary disabled:opacity-50"
       :disabled="loading"
+      :aria-busy="loading ? 'true' : undefined"
       @click="loadNext"
-    >Load more</button>
+    ><ReleaseSpinner v-if="loading" class="mr-[6px]" />Load more</button>
   </div>
 </template>

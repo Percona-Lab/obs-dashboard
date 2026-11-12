@@ -78,6 +78,83 @@ describe('useRelease', () => {
     expect(await useRelease().loadHistory(1)).toBeNull()
   })
 
+  it('names the action in flight until the view has been refreshed', async () => {
+    let finishPost!: (r: Response) => void
+    let finishGet!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((res) => {
+      if (init?.method === 'POST') finishPost = res
+      else finishGet = res
+    })))
+    const r = useRelease()
+    expect(r.pending.value).toBe('')
+    const done = r.act('r1', 'approve-qa', 'abc')
+    expect(r.pending.value).toBe('approve-qa')
+    finishPost(new Response(null, { status: 204 }))
+    await Promise.resolve(); await Promise.resolve()
+    // the write is done, the refresh is not: still pending
+    expect(r.pending.value).toBe('approve-qa')
+    await vi.waitFor(() => expect(finishGet).toBeTypeOf('function'))
+    finishGet(json(snap))
+    await done
+    expect(r.pending.value).toBe('')
+    expect(r.busy.value).toBe(false)
+  })
+
+  it('keeps the action pending until the release changes on screen', async () => {
+    const rel = (sync_state: string) => ({ id: 'r1', step: 'sync', head_sha: 'abc', cut: null, sync_state, sync: [], qa: null, final: null })
+    let state = 'failure'
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === 'POST' ? new Response(null, { status: 204 }) : json({ ...snap, releases: [rel(state)] })))
+    vi.stubGlobal('fetch', f)
+    const r = useRelease()
+    await r.refresh()
+    let finished = false
+    const done = r.act('r1', 'retry-sync', 'abc').then((ok) => { finished = true; return ok })
+    // the write and the first refresh are done, but GitHub still shows the failed run
+    await vi.advanceTimersByTimeAsync(100)
+    expect(r.pending.value).toBe('retry-sync')
+    expect(r.busy.value).toBe(true)
+    expect(finished).toBe(false)
+    // it keeps looking every few seconds
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(r.pending.value).toBe('retry-sync')
+    // the new run shows up
+    state = 'queued'
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(await done).toBe(true)
+    expect(r.pending.value).toBe('')
+    expect(r.busy.value).toBe(false)
+  })
+
+  it('stops waiting for a change after 90 seconds', async () => {
+    const rel = { id: 'r1', step: 'sync', head_sha: 'abc', cut: null, sync_state: 'failure', sync: [], qa: null, final: null }
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === 'POST' ? new Response(null, { status: 204 }) : json({ ...snap, releases: [rel] }))))
+    const r = useRelease()
+    await r.refresh()
+    const done = r.act('r1', 'retry-sync', 'abc')
+    await vi.advanceTimersByTimeAsync(89_000)
+    expect(r.pending.value).toBe('retry-sync')
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(await done).toBe(true)
+    expect(r.pending.value).toBe('')
+    expect(r.notice.value).toBe('GitHub has not shown a change yet. The view keeps refreshing.')
+  })
+
+  it('does not wait when the action failed or the release was not on screen', async () => {
+    const rel = { id: 'r1', step: 'sync', head_sha: 'abc', cut: null, sync_state: 'failure', sync: [], qa: null, final: null }
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === 'POST' ? new Response('conflict', { status: 409 }) : json({ ...snap, releases: [rel] }))))
+    const r = useRelease()
+    await r.refresh()
+    expect(await r.act('r1', 'retry-sync', 'abc')).toBe(false)
+    expect(r.pending.value).toBe('')
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === 'POST' ? new Response(null, { status: 204 }) : json({ ...snap, releases: [rel] }))))
+    expect(await r.act('other', 'abandon', 'abc')).toBe(true)
+    expect(r.pending.value).toBe('')
+  })
+
   it('act refreshes and reports 409', async () => {
     const f = vi.fn((_url: string, init?: RequestInit) =>
       Promise.resolve(init?.method === 'POST' ? new Response('conflict', { status: 409 }) : json(snap)))

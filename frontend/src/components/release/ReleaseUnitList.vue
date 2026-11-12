@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { UnitRow } from '../../types/release'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 
 const props = defineProps<{ units: UnitRow[]; busy: boolean; error: string }>()
 const emit = defineEmits<{ cut: [units: string[]]; open: [releaseId: string]; 'open-builds': [] }>()
@@ -109,8 +110,9 @@ const pillClass = (u: UnitRow) => {
           type="button"
           class="cursor-pointer rounded-[8px] border border-border-strong bg-bg-card px-4 py-2 text-[13px] font-semibold text-brand-purple disabled:cursor-default disabled:opacity-50"
           :disabled="!selected.length || busy"
+          :aria-busy="busy ? 'true' : undefined"
           @click="emit('cut', [...selected])"
-        >Cut release</button>
+        ><ReleaseSpinner v-if="busy" light class="mr-[6px]" />Cut release</button>
       </div>
     </template>
   </div>

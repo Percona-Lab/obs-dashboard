@@ -11,6 +11,13 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Every button of the Release tab shows a spinner from the click until the
+  release has changed on screen. After a retry, where GitHub takes a few
+  seconds to show the new run, the view refreshes every 3 seconds until it
+  does, for at most 90 seconds.
+
 ## [0.2.3] - 2026-11-12
 
 ### Fixed

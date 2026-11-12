@@ -46,6 +46,11 @@ describe('ReleaseUnitList', () => {
     expect(w.emitted('cut')![0]).toEqual([['ppg:staging:common:tools']])
   })
 
+  it('shows a spinner in the cut button while the cut is being sent', () => {
+    expect(mk({ busy: true }).get('[data-testid="cut-release"]').find('[data-testid="spinner"]').exists()).toBe(true)
+    expect(mk().get('[data-testid="cut-release"]').find('[data-testid="spinner"]').exists()).toBe(false)
+  })
+
   it('disables cut while busy', async () => {
     const w = mk({ busy: true })
     await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
