@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-12
+
 ### Changed
 
 - The release wizard's step bar marks finished steps with a tick, highlights
