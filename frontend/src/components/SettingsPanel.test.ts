@@ -29,6 +29,17 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+class FakeEventSource {
+  static instances: FakeEventSource[] = []
+  onopen: (() => void) | null = null
+  onerror: (() => void) | null = null
+  close = vi.fn()
+  constructor(public url: string) {
+    FakeEventSource.instances.push(this)
+  }
+  addEventListener(): void {}
+}
+
 async function mounted() {
   const w = mount(SettingsPanel)
   await flushPromises()
@@ -102,5 +113,36 @@ describe('SettingsPanel Access zone', () => {
     handler = () => new Response('unauthorized', { status: 401 })
     await mounted()
     expect(useAuth().user.value).toBeNull()
+  })
+})
+
+describe('SettingsPanel sub-tabs', () => {
+  beforeEach(() => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+  })
+
+  it('opens on General', async () => {
+    const w = await mounted()
+    expect(w.find('[data-testid="access-zone"]').exists()).toBe(true)
+    expect(w.find('[data-testid="log-view"]').exists()).toBe(false)
+    expect(FakeEventSource.instances).toHaveLength(0)
+  })
+
+  it('Server log tab shows the log and opens the stream', async () => {
+    const w = await mounted()
+    await w.find('[data-testid="settings-tab-log"]').trigger('click')
+    expect(w.find('[data-testid="log-view"]').exists()).toBe(true)
+    expect(w.find('[data-testid="access-zone"]').exists()).toBe(false)
+    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(FakeEventSource.instances[0].url).toBe('/api/logs/stream')
+  })
+
+  it('leaving the Server log tab closes the stream', async () => {
+    const w = await mounted()
+    await w.find('[data-testid="settings-tab-log"]').trigger('click')
+    await w.find('[data-testid="settings-tab-general"]').trigger('click')
+    expect(FakeEventSource.instances[0].close).toHaveBeenCalled()
+    expect(w.find('[data-testid="access-zone"]').exists()).toBe(true)
   })
 })

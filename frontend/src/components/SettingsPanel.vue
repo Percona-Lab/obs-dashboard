@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useSettingsUsers } from '../composables/useSettingsUsers'
 import ServiceZone from './ServiceZone.vue'
+import ServerLogPanel from './ServerLogPanel.vue'
 
 const { user } = useAuth()
 const { admins, users, loadError, list, add, remove } = useSettingsUsers()
@@ -10,6 +11,10 @@ const newEmail = ref('')
 const addError = ref<string | null>(null)
 const removeError = ref<string | null>(null)
 const busy = ref(false)
+const subTab = ref<'general' | 'log'>('general')
+const tabBase = 'px-3 py-1 rounded-[7px] border text-[13px] cursor-pointer [font-family:inherit]'
+const tabOn = 'bg-bg-card text-text-primary font-bold border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+const tabOff = 'bg-transparent text-text-muted font-medium border-transparent'
 
 onMounted(list)
 
@@ -29,8 +34,23 @@ async function onRemove(email: string) {
 
 <template>
   <div class="flex flex-col gap-5">
-    <ServiceZone />
-    <section data-testid="access-zone" class="rounded-[14px] border border-border bg-bg-card p-5 flex flex-col gap-4">
+    <div class="flex gap-[3px] bg-bg-muted p-[3px] rounded-[9px] border border-border self-start">
+      <button
+        data-testid="settings-tab-general"
+        :aria-selected="subTab === 'general'"
+        :class="[tabBase, subTab === 'general' ? tabOn : tabOff]"
+        @click="subTab = 'general'"
+      >General</button>
+      <button
+        data-testid="settings-tab-log"
+        :aria-selected="subTab === 'log'"
+        :class="[tabBase, subTab === 'log' ? tabOn : tabOff]"
+        @click="subTab = 'log'"
+      >Server log</button>
+    </div>
+    <ServerLogPanel v-if="subTab === 'log'" />
+    <ServiceZone v-if="subTab === 'general'" />
+    <section v-if="subTab === 'general'" data-testid="access-zone" class="rounded-[14px] border border-border bg-bg-card p-5 flex flex-col gap-4">
       <header class="flex flex-col gap-1">
         <h2 class="m-0 text-[16px] font-bold text-text-primary">Access</h2>
         <p class="m-0 text-[12.5px] text-text-muted">

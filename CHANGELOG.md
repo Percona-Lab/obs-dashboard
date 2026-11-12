@@ -11,6 +11,15 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Settings has a "Server log" tab that shows the backend's log live, for signed-in users.
+- The backend writes its log to `obs-dashboard.log` next to the database, as well as to standard error.
+
+### Host changes
+
+- No action needed. A log file appears at `/var/lib/obs-dashboard/obs-dashboard.log`. It is capped at 10 MB, with one previous file kept as `obs-dashboard.log.1`. `journalctl -u obs-dashboard` still shows the same lines.
+
 ## [0.2.6] - 2026-11-12
 
 ### Added
