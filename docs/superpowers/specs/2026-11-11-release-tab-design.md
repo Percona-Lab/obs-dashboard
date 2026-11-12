@@ -256,6 +256,12 @@ failed lanes first, each failed lane linking to its Jenkins job **(user)**;
 passed lanes collapsed. A lane without a Jenkins link falls back to its
 GitHub job page.
 
+A release can have no QA tests at all: the QA run then finishes
+successfully without a single lane (the fan-out ran, its matrix was empty,
+and its only lane job is skipped). QA counts as finished; the step says that
+no QA tests are defined, and "Release" is offered with a confirmation that
+says no tests ran **(user)**.
+
 If the QA run fails before any lane starts (the wait for the download
 servers, or the matrix detection), the step shows "QA could not start" or
 that the download servers did not serve the pre-release in time, with a link

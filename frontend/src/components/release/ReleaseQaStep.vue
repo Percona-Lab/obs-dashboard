@@ -50,6 +50,7 @@ const hasBad = computed(() => failed.value.length > 0 || unfinished.value.length
 const openRelease = () => { dialog.value = { id: props.release.id, head: props.release.head_sha, confirmFailed: hasBad.value } }
 const releaseBody = computed(() => {
   const parts: string[] = []
+  if (!lanes.value.length) parts.push('No QA tests ran for this release.')
   if (failed.value.length) parts.push(`These QA lanes failed: ${failed.value.map((l) => l.name).join(', ')}.`)
   if (unfinished.value.length) parts.push(`These QA lanes did not finish: ${unfinished.value.map((l) => l.name).join(', ')}.`)
   parts.push(parts.length ? 'The release merges the PR and cannot be undone.' : 'This merges the release PR and cannot be undone.')
@@ -89,6 +90,7 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
       </div>
 
       <div v-if="qa.state === 'running' && !lanes.length" data-testid="qa-starting" role="status" class="flex items-center gap-2 rounded-[10px] border border-border p-3 text-text-secondary"><ReleaseSpinner /><span>Waiting for QA to start</span></div>
+      <div v-else-if="qa.state === 'finished' && !lanes.length" data-testid="qa-none" class="rounded-[10px] border border-border p-3 text-text-secondary">No QA tests are defined for this release, so nothing ran. You can release it.</div>
       <div v-else-if="!qaFailed || lanes.length" data-testid="qa-counts" class="flex gap-4 text-[13px]">
         <span class="text-ok">{{ passed.length }} passed</span>
         <span class="text-fail">{{ failed.length }} failed</span>

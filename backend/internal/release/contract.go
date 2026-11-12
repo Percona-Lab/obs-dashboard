@@ -20,9 +20,12 @@ const (
 	JobPopulatePrefix = "Populate pre-release (" // + instance + ")"
 	JobCDNPrefix      = "Wait for download CDN ("
 	JobLanePrefix     = "Release / OBS QA / "
-	JobCopyPrefix     = "Release to OBS ("
-	JobFinalize       = "Publish GitHub releases and delete the pre-release"
-	JobDeletePrefix   = "Delete the pre-release ("
+	// JobQAPrefix starts the name of every job of the QA fan-out, lanes or
+	// not ("Release" is the caller job in obs-release-pr.yml).
+	JobQAPrefix     = "Release / "
+	JobCopyPrefix   = "Release to OBS ("
+	JobFinalize     = "Publish GitHub releases and delete the pre-release"
+	JobDeletePrefix = "Delete the pre-release ("
 
 	AnnotationJenkins    = "Jenkins build"        // message: "<release project> <url>"
 	ArtifactChangelogs   = "generated-changelogs" // one file changelogs.json: {"<unit root>": "<section>"}

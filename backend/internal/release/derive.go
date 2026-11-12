@@ -136,6 +136,11 @@ func isLane(j Job) bool {
 	return strings.HasPrefix(j.Name, JobLanePrefix) && !isSkipped(j)
 }
 
+// isQAFanOut reports a job of the QA fan-out that ran, lane or not.
+func isQAFanOut(j Job) bool {
+	return strings.HasPrefix(j.Name, JobQAPrefix) && !isSkipped(j)
+}
+
 func isCDN(j Job) bool {
 	_, ok := InstanceOf(j.Name, JobCDNPrefix)
 	return ok && !isSkipped(j)
@@ -313,6 +318,10 @@ func QALanes(f Facts, units []UnitState, hasQALabel bool) QA {
 	case len(qa.Lanes) == 0 && runFailed(*run):
 		qa.State, qa.Error = "failure", qaErrStart
 	case len(qa.Lanes) > 0 && run.Status == "completed":
+		qa.State = "finished"
+	case run.Status == "completed" && hasJob(f.Jobs[run.ID], isQAFanOut):
+		// The fan-out ran and declared no lane: the release has no QA
+		// tests. Nothing to wait for.
 		qa.State = "finished"
 	}
 	return qa
