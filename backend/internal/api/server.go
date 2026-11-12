@@ -44,7 +44,7 @@ type CveRescanner interface {
 
 // NewRouter creates the chi router with all API routes registered. authSvc
 // gates state-changing routes; reads stay public.
-func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager, rescan CveRescanner, rel ReleaseService) http.Handler {
+func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEnabled *atomic.Bool, telemetryInterval time.Duration, gate PresenceGate, authSvc *auth.Service, upg *upgrade.Manager, rescan CveRescanner, rel ReleaseService, logs LogSource) http.Handler {
 	r := chi.NewRouter()
 	r.Use(stripCallbackQuery)
 	r.Use(middleware.Logger)
@@ -126,6 +126,15 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 			mountRelease(r, rel, authSvc.CheckOrigin)
 		}
 	})
+
+	// The server log is an admin matter too: signed-in users only, and it
+	// never travels on the public /api/stream.
+	if logs != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authSvc.RequireUser)
+			r.Get("/api/logs/stream", logStreamHandler(logs))
+		})
+	}
 	return r
 }
 

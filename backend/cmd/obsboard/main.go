@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/percona/obs-dashboard/internal/config"
 	"github.com/percona/obs-dashboard/internal/cve"
 	"github.com/percona/obs-dashboard/internal/hub"
+	"github.com/percona/obs-dashboard/internal/logsink"
 	"github.com/percona/obs-dashboard/internal/metricsampler"
 	"github.com/percona/obs-dashboard/internal/model"
 	"github.com/percona/obs-dashboard/internal/mq"
@@ -32,7 +35,12 @@ import (
 	"github.com/percona/obs-dashboard/internal/workingset"
 )
 
+// logs copies the standard logger's output (which slog writes through) to
+// stderr and to a file, and feeds the live log stream.
+var logs = logsink.New(os.Stderr)
+
 func main() {
+	log.SetOutput(logs)
 	if err := run(); err != nil {
 		slog.Error("startup failed", "err", err)
 		os.Exit(1)
@@ -45,6 +53,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	logs.Open(filepath.Join(filepath.Dir(cfg.Store.DBPath), "obs-dashboard.log"))
 
 	db, err := store.Open(cfg.Store.DBPath)
 	if err != nil {
@@ -214,7 +223,7 @@ func run() error {
 		slog.Info("release: enabled", "repo", cfg.Release.GitHubRepo)
 	}
 
-	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg, scanner, rel)
+	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg, scanner, rel, logs)
 
 	go fleet.RunHealthWatch(ctx, 15*time.Second, func(slug string, health obs.Health) {
 		h.Notify(hub.InstanceHealth(map[string]any{"slug": slug, "health": health}))
