@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRelease } from '../../composables/useRelease'
+import ReleaseSpinner from './ReleaseSpinner.vue'
 import ReleaseConfirm from './ReleaseConfirm.vue'
 import { dropDraft, getDraft, sameText, setDraft } from '../../composables/useChangelogDrafts'
 import { parseChangelog, segments } from '../../lib/changelogPreview'
 import type { ReleaseState } from '../../types/release'
 
 const props = defineProps<{ release: ReleaseState }>()
-const { saveChangelog, resetChangelog, act, busy } = useRelease()
+const { saveChangelog, resetChangelog, act, busy, pending } = useRelease()
 
 const active = ref(props.release.units[0]?.unit ?? '')
 const text = reactive<Record<string, string>>({})
@@ -137,14 +138,14 @@ async function approve() {
     <div v-if="editable && unit" class="flex items-center justify-between text-[12px] text-text-muted">
       <span>{{ dirty(unit.unit) ? `Unsaved edits in ${unit.release_id}` : '' }}</span>
       <span class="flex gap-2">
-        <button type="button" data-testid="reset-changelog" :disabled="unit.generated === null || busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:cursor-not-allowed disabled:opacity-50" @click="reset">Reset to generated text</button>
-        <button type="button" data-testid="save-changelog" :disabled="!dirty(unit.unit) || busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:cursor-not-allowed disabled:opacity-50" @click="save">Save</button>
+        <button type="button" data-testid="reset-changelog" :disabled="unit.generated === null || busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:cursor-not-allowed disabled:opacity-50" @click="reset" :aria-busy="pending === 'reset-changelog' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'reset-changelog'" />Reset to generated text</button>
+        <button type="button" data-testid="save-changelog" :disabled="!dirty(unit.unit) || busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:cursor-not-allowed disabled:opacity-50" @click="save" :aria-busy="pending === 'save-changelog' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'save-changelog'" />Save</button>
       </span>
     </div>
 
     <div v-if="editable" class="flex items-center justify-between gap-3 border-t border-border pt-3 text-[13px] text-text-muted">
       <span>Approving starts the pre-release sync for all units. Staging is frozen while it copies.</span>
-      <button type="button" data-testid="approve-changelog" :disabled="anyDirty || busy" class="cursor-pointer rounded-md border-0 bg-brand-purple px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="approve">Approve changelogs &amp; start sync →</button>
+      <button type="button" data-testid="approve-changelog" :disabled="anyDirty || busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border-0 bg-brand-purple px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="approve" :aria-busy="pending === 'approve-changelog' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'approve-changelog'" light />Approve changelogs &amp; start sync →</button>
     </div>
     <ReleaseConfirm v-if="resetDialog" title="Discard your edits?" :body="`Discard your edits to ${resetDialog.releaseId} and restore the generated text?`" confirm-label="Discard & restore" danger @confirm="confirmReset" @cancel="resetDialog = null" />
   </div>

@@ -17,6 +17,9 @@ const unitsError = ref('')
 const unitsLoaded = ref(false)
 // True when the latest refresh of the releases failed.
 const loadFailed = ref(false)
+// The action in flight ('' when none): set when it is sent, cleared once the
+// view has been refreshed after it, so a button can show it is working.
+const pending = ref('')
 const notice = ref('')
 const busy = ref(false)
 
@@ -86,9 +89,42 @@ async function loadUnits(): Promise<void> {
 
 // send performs a write, then always refreshes the snapshot. Returns the
 // response when it was ok, otherwise null with `notice` set.
-async function send(method: string, path: string, body: unknown): Promise<Response | null> {
+// What of a release is visible in the wizard and changes when an action took
+// effect. undefined when the release is not in the snapshot.
+function shown(id: string): string | undefined {
+  const r = snapshot.value?.releases.find((x) => x.id === id)
+  if (!r) return undefined
+  return JSON.stringify([
+    r.step, r.head_sha, r.cut?.state, r.sync_state, r.sync?.map((c) => c.state),
+    r.qa?.state, r.qa?.lanes?.length, r.final?.state,
+  ])
+}
+
+const SETTLE_POLL_MS = 3000
+const SETTLE_MAX_MS = 90_000
+const SETTLE_NOTICE = 'GitHub has not shown a change yet. The view keeps refreshing.'
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+// settle keeps refreshing until the release looks different from `before`
+// (GitHub can take a few seconds to show the effect of an action, for example
+// the new run after a retry), or until SETTLE_MAX_MS has passed.
+async function settle(id: string, before: string): Promise<void> {
+  const deadline = Date.now() + SETTLE_MAX_MS
+  while (shown(id) === before) {
+    if (Date.now() >= deadline) { notice.value = SETTLE_NOTICE; return }
+    await sleep(SETTLE_POLL_MS)
+    await doRefresh(true)
+  }
+}
+
+// `id` names the release the action is about, when it is one already shown:
+// the action then stays pending until that release changes on screen.
+async function send(what: string, method: string, path: string, body: unknown, id?: string): Promise<Response | null> {
   busy.value = true
+  pending.value = what
   notice.value = ''
+  const before = id === undefined ? undefined : shown(id)
+  let ok = false
   try {
     const res = await fetch(`${BASE}${path}`, {
       method,
@@ -99,18 +135,21 @@ async function send(method: string, path: string, body: unknown): Promise<Respon
     if (!res.ok) {
       notice.value = res.status === 409 ? CONFLICT_NOTICE : await errorText(res)
     }
+    ok = res.ok
     return res.ok ? res : null
   } catch {
     notice.value = 'Network error'
     return null
   } finally {
     await doRefresh(true)
+    if (ok && id !== undefined && before !== undefined) await settle(id, before)
     busy.value = false
+    pending.value = ''
   }
 }
 
 async function cut(unitIDs: string[]): Promise<string | null> {
-  const res = await send('POST', '/releases', { units: unitIDs })
+  const res = await send('cut', 'POST', '/releases', { units: unitIDs })
   if (!res) return null
   try {
     return ((await res.json()) as { id: string }).id
@@ -120,15 +159,15 @@ async function cut(unitIDs: string[]): Promise<string | null> {
 }
 
 async function saveChangelog(id: string, head: string, unit: string, section: string): Promise<boolean> {
-  return (await send('PUT', `/releases/${encodeURIComponent(id)}/changelog`, { head, unit, section })) !== null
+  return (await send('save-changelog', 'PUT', `/releases/${encodeURIComponent(id)}/changelog`, { head, unit, section }, id)) !== null
 }
 
 async function resetChangelog(id: string, head: string, unit: string): Promise<boolean> {
-  return (await send('POST', `/releases/${encodeURIComponent(id)}/changelog/reset`, { head, unit })) !== null
+  return (await send('reset-changelog', 'POST', `/releases/${encodeURIComponent(id)}/changelog/reset`, { head, unit }, id)) !== null
 }
 
 async function act(id: string, action: ReleaseAction, head: string, confirmFailed = false): Promise<boolean> {
-  return (await send('POST', `/releases/${encodeURIComponent(id)}/${action}`, { head, confirm_failed: confirmFailed })) !== null
+  return (await send(action, 'POST', `/releases/${encodeURIComponent(id)}/${action}`, { head, confirm_failed: confirmFailed }, id)) !== null
 }
 
 // null on any failure, so callers can tell an error from an empty page.
@@ -182,13 +221,14 @@ export function resetReleaseForTests(): void {
   unitsError.value = ''
   unitsLoaded.value = false
   loadFailed.value = false
+  pending.value = ''
   notice.value = ''
   busy.value = false
 }
 
 export function useRelease() {
   return {
-    enabled, snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy,
+    enabled, snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy, pending,
     loadStatus, refresh: () => doRefresh(), loadUnits,
     start, stopPolling,
     cut, saveChangelog, resetChangelog, act, loadHistory,

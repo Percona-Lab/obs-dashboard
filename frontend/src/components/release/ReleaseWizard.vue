@@ -13,7 +13,7 @@ import type { ReleaseState } from '../../types/release'
 
 const props = defineProps<{ release: ReleaseState }>()
 const emit = defineEmits<{ back: [] }>()
-const { act, busy } = useRelease()
+const { act, busy, pending } = useRelease()
 
 const STEPS = ['Select', 'Changelog', 'Pre-release sync', 'QA', 'Release']
 const stepIndex = computed(() => ({ cutting: 1, changelog: 1, sync: 2, qa: 3, releasing: 4 })[props.release.step])
@@ -143,8 +143,8 @@ const status = computed<Status>(() => {
         <small class="text-text-muted">started by {{ release.started_by || 'unknown' }}<template v-if="ago(release.started_at)"> · {{ ago(release.started_at) }}</template></small>
       </div>
       <div class="flex gap-2">
-        <button v-if="showRecut" type="button" data-testid="recut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="openDialog('recut')">Update to latest main &amp; restart</button>
-        <button v-if="showAbandon" type="button" data-testid="abandon" :disabled="busy || abandonBlocked" :title="abandonBlocked ? 'Wait for the cut to finish before abandoning.' : undefined" class="cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:cursor-not-allowed disabled:opacity-50" @click="openDialog('abandon')">Abandon release</button>
+        <button v-if="showRecut" type="button" data-testid="recut" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="openDialog('recut')" :aria-busy="pending === 'recut' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'recut'" />Update to latest main &amp; restart</button>
+        <button v-if="showAbandon" type="button" data-testid="abandon" :disabled="busy || abandonBlocked" :title="abandonBlocked ? 'Wait for the cut to finish before abandoning.' : undefined" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:cursor-not-allowed disabled:opacity-50" @click="openDialog('abandon')" :aria-busy="pending === 'abandon' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'abandon'" />Abandon release</button>
       </div>
     </div>
 
@@ -195,7 +195,7 @@ const status = computed<Status>(() => {
       <div v-if="cutFailed" data-testid="cut-failed" class="mt-3 flex flex-wrap items-center gap-3 text-fail">
         <b>The cut failed</b>
         <a v-if="release.cut?.url && safeHref(release.cut.url)" :href="safeHref(release.cut.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run</a>
-        <button v-if="showRetry" type="button" data-testid="retry-cut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retry">Retry</button>
+        <button v-if="showRetry" type="button" data-testid="retry-cut" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retry" :aria-busy="pending === 'recut' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'recut'" />Retry</button>
       </div>
     </div>
 
@@ -204,7 +204,7 @@ const status = computed<Status>(() => {
         <div class="flex flex-wrap items-center gap-3 text-fail">
           <b>The cut failed</b>
           <a v-if="release.cut?.url && safeHref(release.cut.url)" :href="safeHref(release.cut.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run</a>
-          <button v-if="showRetry" type="button" data-testid="retry-cut" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retry">Retry</button>
+          <button v-if="showRetry" type="button" data-testid="retry-cut" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retry" :aria-busy="pending === 'recut' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'recut'" />Retry</button>
         </div>
         <small class="text-text-muted">The release was not updated. The changelog below is the one from before and cannot be edited or approved until a cut succeeds.</small>
       </div>
@@ -231,7 +231,7 @@ const status = computed<Status>(() => {
         <div v-if="release.sync_error" data-testid="sync-error" class="rounded-[10px] border border-fail p-3 text-fail">{{ release.sync_error }}</div>
         <ReleaseRunCards :cards="release.sync" />
         <div v-if="syncFailed && canAct" class="flex items-center gap-3">
-          <button type="button" data-testid="retry-sync" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retrySync">Retry sync</button>
+          <button type="button" data-testid="retry-sync" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retrySync" :aria-busy="pending === 'retry-sync' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'retry-sync'" />Retry sync</button>
           <small class="text-text-muted">Or use "Update to latest main &amp; restart" above.</small>
         </div>
         <ReleaseRemovals v-if="release.sync_state === 'success'" :release="release" />
@@ -253,7 +253,7 @@ const status = computed<Status>(() => {
         </div>
         <div v-if="release.final?.state === 'failure'" data-testid="final-failed" class="text-fail">The final sync failed.</div>
         <div v-if="release.final?.state === 'failure' && canAct">
-          <button type="button" data-testid="retry-final" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryFinal">Retry final sync</button>
+          <button type="button" data-testid="retry-final" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryFinal" :aria-busy="pending === 'retry-release' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'retry-release'" />Retry final sync</button>
         </div>
       </div>
     </template>

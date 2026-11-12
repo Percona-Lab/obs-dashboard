@@ -7,8 +7,9 @@ import { resetDraftsForTests } from '../../composables/useChangelogDrafts'
 import type { ReleaseState } from '../../types/release'
 
 const act = vi.fn(() => Promise.resolve(true))
+const pending = ref('')
 vi.mock('../../composables/useRelease', () => ({
-  useRelease: () => ({ saveChangelog: vi.fn(), resetChangelog: vi.fn(), act, busy: ref(false) }),
+  useRelease: () => ({ saveChangelog: vi.fn(), resetChangelog: vi.fn(), act, busy: ref(false), pending }),
 }))
 
 const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
@@ -150,6 +151,38 @@ describe('ReleaseWizard', () => {
     expect(steps[3].get('[data-testid="step-mark"]').text()).toBe('4')
     expect(w.get('[data-testid="step-status"]').find('[data-testid="spinner"]').exists()).toBe(true)
     expect(mountW({ step: 'changelog' }).get('[data-testid="step-status"]').find('[data-testid="spinner"]').exists()).toBe(false)
+  })
+
+  it('shows a spinner in the wizard button whose action is in flight', async () => {
+    const spins = (w: ReturnType<typeof mountW>, id: string) => w.get(`[data-testid="${id}"]`).find('[data-testid="spinner"]').exists()
+    pending.value = ''
+    const w = mountW({ step: 'sync', sync_state: 'failure' })
+    expect(spins(w, 'retry-sync')).toBe(false)
+    pending.value = 'retry-sync'
+    await w.vm.$nextTick()
+    expect(spins(w, 'retry-sync')).toBe(true)
+    expect(spins(w, 'abandon')).toBe(false)
+    pending.value = 'abandon'
+    await w.vm.$nextTick()
+    expect(spins(w, 'abandon')).toBe(true)
+    expect(spins(w, 'retry-sync')).toBe(false)
+    pending.value = 'recut'
+    await w.vm.$nextTick()
+    expect(spins(w, 'recut')).toBe(true)
+
+    const cl = mountW({ step: 'changelog' })
+    pending.value = 'approve-changelog'
+    await cl.vm.$nextTick()
+    expect(spins(cl, 'approve-changelog')).toBe(true)
+    pending.value = 'save-changelog'
+    await cl.vm.$nextTick()
+    expect(spins(cl, 'save-changelog')).toBe(true)
+    expect(spins(cl, 'approve-changelog')).toBe(false)
+
+    pending.value = 'retry-release'
+    const fin = mountW({ step: 'releasing', final: { tags: [], instances: [], github_releases: '', cleanup: '', state: 'failure', url: '' } })
+    expect(spins(fin, 'retry-final')).toBe(true)
+    pending.value = ''
   })
 
   it('hides abandon while releasing', () => {

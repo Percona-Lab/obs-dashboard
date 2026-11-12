@@ -8,7 +8,7 @@ import ReleaseRemovals from './ReleaseRemovals.vue'
 import type { Lane, ReleaseState } from '../../types/release'
 
 const props = defineProps<{ release: ReleaseState }>()
-const { act, busy } = useRelease()
+const { act, busy, pending } = useRelease()
 
 const qa = computed(() => props.release.qa)
 const lanes = computed(() => qa.value?.lanes ?? [])
@@ -72,7 +72,7 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
     <template v-if="qa?.state === 'waiting' || !qa">
       <ReleaseRemovals :release="release" />
       <div v-if="qa" class="flex items-center gap-3">
-        <button v-if="canAct" type="button" data-testid="approve-qa" :disabled="busy" class="cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:opacity-50" @click="approve">Approve &amp; run QA</button>
+        <button v-if="canAct" type="button" data-testid="approve-qa" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:opacity-50" @click="approve" :aria-busy="pending === 'approve-qa' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'approve-qa'" light />Approve &amp; run QA</button>
         <small class="text-text-muted">Adds the qa-release label to the PR.</small>
       </div>
     </template>
@@ -84,7 +84,7 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
           <a v-if="safeHref(qa.url)" :href="safeHref(qa.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">View the run on GitHub</a>
         </div>
         <div v-if="canAct" class="flex flex-wrap items-center gap-3">
-          <button type="button" data-testid="retry-qa" :disabled="busy" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryQa">Retry QA</button>
+          <button type="button" data-testid="retry-qa" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="retryQa" :aria-busy="pending === 'retry-qa' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'retry-qa'" />Retry QA</button>
           <small class="text-text-muted">Or use "Update to latest main &amp; restart" above.</small>
         </div>
       </div>
@@ -122,7 +122,7 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
       <p v-if="failed.length" class="m-0 text-[12px] text-text-muted">Fix the failures outside the dashboard, then use "Update to latest main &amp; restart" above, or release anyway after a confirmation.</p>
 
       <div v-if="canAct" class="flex items-center gap-3">
-        <button type="button" data-testid="release" :disabled="!canRelease" class="cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="openRelease">Release</button>
+        <button type="button" data-testid="release" :disabled="!canRelease" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="openRelease" :aria-busy="pending === 'release' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'release'" light />Release</button>
         <small v-if="qaFailed" class="text-text-muted">Not available: QA did not run.</small>
         <small v-else-if="qa.state !== 'finished'" class="text-text-muted">Available once every QA lane has finished.</small>
       </div>

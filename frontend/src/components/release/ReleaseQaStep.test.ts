@@ -6,7 +6,8 @@ import ReleaseQaStep from './ReleaseQaStep.vue'
 import type { Lane, ReleaseState } from '../../types/release'
 
 const act = vi.fn(() => Promise.resolve(true))
-vi.mock('../../composables/useRelease', () => ({ useRelease: () => ({ act, busy: ref(false) }) }))
+const pending = ref('')
+vi.mock('../../composables/useRelease', () => ({ useRelease: () => ({ act, busy: ref(false), pending }) }))
 
 const lane = (o: Partial<Lane>): Lane => ({ name: 'l', unit: 'u', jenkins_url: '', url: 'https://github.com/j/1', state: 'success', ...o })
 type QA = NonNullable<ReleaseState['qa']>
@@ -18,9 +19,30 @@ const rel = (qaIn: QAIn, o: Partial<ReleaseState> = {}): ReleaseState => { const
 } }
 const mountQ = (qa: QAIn, o: Partial<ReleaseState> = {}) => mount(ReleaseQaStep, { props: { release: rel(qa, o) }, attachTo: document.body })
 
-beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
+beforeEach(() => { vi.clearAllMocks(); pending.value = ''; document.body.innerHTML = '' })
 
 describe('ReleaseQaStep', () => {
+  it('shows a spinner in the button whose action is in flight, and only there', async () => {
+    const spins = (w: ReturnType<typeof mountQ>, id: string) => w.get(`[data-testid="${id}"]`).find('[data-testid="spinner"]').exists()
+    const waiting = mountQ({ state: 'waiting', lanes: [] })
+    expect(spins(waiting, 'approve-qa')).toBe(false)
+    pending.value = 'approve-qa'
+    await waiting.vm.$nextTick()
+    expect(spins(waiting, 'approve-qa')).toBe(true)
+    expect(waiting.get('[data-testid="approve-qa"]').attributes('aria-busy')).toBe('true')
+
+    pending.value = 'release'
+    const finished = mountQ({ state: 'finished', lanes: [lane({ state: 'success' })] })
+    expect(spins(finished, 'release')).toBe(true)
+
+    pending.value = 'retry-qa'
+    const failed = mountQ({ state: 'failure', lanes: [] })
+    expect(spins(failed, 'retry-qa')).toBe(true)
+    pending.value = 'abandon'
+    await failed.vm.$nextTick()
+    expect(spins(failed, 'retry-qa')).toBe(false)
+  })
+
   it('says there are no QA tests when QA finished without a single lane, and lets the user release', async () => {
     const w = mountQ({ state: 'finished', lanes: [] })
     expect(w.get('[data-testid="qa-none"]').text()).toContain('No QA tests are defined for this release')
