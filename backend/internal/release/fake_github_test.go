@@ -37,6 +37,7 @@ type fakeGitHub struct {
 	hasClosedErr error            // returned by HasClosedPull only
 	deleteErr    error            // returned by DeleteBranch only
 	closeErr     error            // returned by ClosePull only
+	createErr    error            // returned by CreatePull only
 	fileErrs     map[string]error // "ref:path" -> error File returns for it
 	nextPR       int
 	block        chan struct{} // when non-nil, Branches waits for it to close
@@ -179,6 +180,9 @@ func (f *fakeGitHub) CreatePull(ctx context.Context, head, title, body string) (
 	defer f.mu.Unlock()
 	if err != nil {
 		return Pull{}, err
+	}
+	if f.createErr != nil {
+		return Pull{}, f.createErr
 	}
 	for _, p := range f.open {
 		if p.HeadRef == head && p.HeadRepo == p.BaseRepo {

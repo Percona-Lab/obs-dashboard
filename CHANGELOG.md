@@ -11,6 +11,16 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release tab stuck on "Opening the release PR" for a release of several
+  units. The PR description was built from every unit's changelog section and
+  could exceed GitHub's limit of 65536 characters, so GitHub refused it. A
+  description that would be too long now names the units and their changelog
+  files instead. The title is bounded too.
+- A release PR that cannot be opened is now shown in the wizard, with the
+  reason and how to open it by hand, instead of a spinner that never ends.
+
 ## [0.2.4] - 2026-11-12
 
 ### Changed

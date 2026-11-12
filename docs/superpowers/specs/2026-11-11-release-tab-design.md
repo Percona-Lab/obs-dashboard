@@ -156,6 +156,14 @@ labels, once the cut run has succeeded and every unit has a release id and a
 changelog section. It is opened at most once per branch: a branch whose PR
 someone closed is left alone and not listed **(review)**.
 
+The PR description is the changelog sections of the units. GitHub refuses a
+description over 65536 characters, which a release of several units can
+exceed, so above 60000 bytes the description names each unit, its release id
+and its changelog file instead. The title is kept under 200 characters. If
+GitHub refuses to open the PR for any reason, the wizard says so, with the
+method, path and status of the refused request and how to open the PR by
+hand; the dashboard keeps trying on every refresh **(review)**.
+
 Other cut states **(review)**:
 
 - **Held for approval.** GitHub can hold a cut run until a person with write

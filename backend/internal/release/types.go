@@ -125,6 +125,9 @@ type Release struct {
 	StartedBy string         `json:"started_by"`
 	StartedAt *time.Time     `json:"started_at"`
 	Actions   []AuditEntry   `json:"actions"`
+	// PRError says why the release PR could not be opened, while the release
+	// waits for it; "" otherwise. The dashboard keeps trying.
+	PRError string `json:"pr_error"`
 	// CutUnits names the unit roots the dashboard asked to cut, while Units
 	// is still empty (the cut has not produced them yet). Empty otherwise.
 	CutUnits []string `json:"cut_units"`

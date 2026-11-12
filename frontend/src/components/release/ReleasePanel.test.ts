@@ -10,7 +10,7 @@ const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
   id: 'r1', branch: 'release/r1', pr: 412, pr_url: 'https://github.com/o/r/pull/412', head_sha: 'abc', step: 'qa',
   dashboard: true, units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '17.10-2', tag: '', changelog: '', generated: null }],
   cut: null, sync_state: '', sync_url: '', sync_error: '', sync: [], removals: [], qa: null, final: null,
-  started_by: '', started_at: null, actions: [], cut_units: [], ...o,
+  started_by: '', started_at: null, actions: [], cut_units: [], pr_error: '', ...o,
 })
 const snap = (releases: ReleaseState[], o: Partial<Snapshot> = {}): Snapshot => ({ releases, stale: false, error: '', refreshed_at: '', ...o })
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 })
