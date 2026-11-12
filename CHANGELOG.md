@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-12
+
 ### Fixed
 
 - Release tab waiting for QA forever when a release has no QA tests. A QA run
