@@ -15,7 +15,7 @@ vi.mock('../../composables/useRelease', () => ({
 const rel = (o: Partial<ReleaseState> = {}): ReleaseState => ({
   id: 'r1', branch: 'b', pr: 5, pr_url: 'https://github.com/o/r/pull/5', head_sha: 'abc', step: 'sync', dashboard: true,
   units: [{ unit: 'u', release_project: '', release_dir: '', release_id: '18.6-6', tag: '', changelog: 'text', generated: null }],
-  cut: null, sync_state: '', sync_url: '', sync_error: '', sync: [], removals: [], qa: null, final: null, started_by: 'me', started_at: null, actions: [], cut_units: [], ...o,
+  cut: null, sync_state: '', sync_url: '', sync_error: '', sync: [], removals: [], qa: null, final: null, started_by: 'me', started_at: null, actions: [], cut_units: [], pr_error: '', ...o,
 })
 const mountW = (o: Partial<ReleaseState> = {}) => mount(ReleaseWizard, { props: { release: rel(o) }, attachTo: document.body })
 
@@ -183,6 +183,22 @@ describe('ReleaseWizard', () => {
     const fin = mountW({ step: 'releasing', final: { tags: [], instances: [], github_releases: '', cleanup: '', state: 'failure', url: '' } })
     expect(spins(fin, 'retry-final')).toBe(true)
     pending.value = ''
+  })
+
+  it('says so when the release PR cannot be opened', () => {
+    const w = mountW({ step: 'cutting', branch: 'release/20261112T090945', pr: 0, pr_url: '', cut: { state: 'success', url: '' }, pr_error: 'github POST /repos/x/pulls: HTTP 422' })
+    const box = w.get('[data-testid="pr-error"]')
+    expect(box.text()).toContain('The release PR could not be opened')
+    expect(box.text()).toContain('github POST /repos/x/pulls: HTTP 422')
+    expect(box.text()).toContain('release/20261112T090945')
+    const line = w.findAll('[data-testid="cut-line"]').find((l) => l.text().includes('Opening the release PR'))!
+    expect(line.find('[data-testid="spinner"]').exists()).toBe(false)
+    expect(line.text()).toContain('✗')
+    expect(w.get('[data-testid="step-status"]').attributes('data-kind')).toBe('failed')
+    expect(w.get('[data-testid="step-status-text"]').text()).toBe('The release PR could not be opened')
+    // without an error the line spins as before
+    const ok = mountW({ step: 'cutting', pr: 0, pr_url: '', cut: { state: 'success', url: '' } })
+    expect(ok.find('[data-testid="pr-error"]').exists()).toBe(false)
   })
 
   it('hides abandon while releasing', () => {

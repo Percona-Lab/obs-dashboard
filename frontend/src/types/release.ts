@@ -85,6 +85,8 @@ export interface ReleaseState {
   started_by: string
   started_at: string | null
   actions: { at: string; email: string; action: string }[]
+  /** Why the release PR could not be opened, while the release waits for it; '' otherwise. */
+  pr_error: string
   /** Unit roots asked for, while `units` is still empty (the cut has not produced them yet). */
   cut_units: string[]
 }

@@ -88,7 +88,7 @@ const progress = computed<Line[]>(() => {
   return [
     { ...(started ? DONE : BUSY), text: 'Starting the cut on GitHub' },
     { ...(st === 'success' ? DONE : st === 'failure' ? { icon: '✗', cls: 'text-fail' } : st === 'running' ? BUSY : TODO), text: 'Generating release files and changelogs' },
-    { ...(r.pr ? DONE : st === 'success' ? BUSY : TODO), text: 'Opening the release PR' },
+    { ...(r.pr ? DONE : r.pr_error ? { icon: '✗', cls: 'text-fail' } : st === 'success' ? BUSY : TODO), text: 'Opening the release PR' },
   ]
 })
 const waitingState = (s: string | undefined) => s === 'queued' || s === 'running'
@@ -107,7 +107,7 @@ const status = computed<Status>(() => {
       if (st === 'failure') return fail('The cut failed')
       if (st === 'approval') return wait('Waiting for approval on GitHub')
       if (st === 'running') return wait('Generating the release files and changelogs')
-      if (st === 'success') return wait('Opening the release PR')
+      if (st === 'success') return r.pr_error ? fail('The release PR could not be opened') : wait('Opening the release PR')
       return wait('Starting the cut on GitHub')
     }
     case 'changelog':
@@ -191,6 +191,11 @@ const status = computed<Status>(() => {
     <div v-else-if="release.step === 'cutting'" data-testid="cut-progress" class="rounded-[10px] border border-border p-4">
       <div v-for="l in progress" :key="l.text" data-testid="cut-line" class="flex items-center gap-[10px] py-1" :class="l.spin ? 'text-text-primary' : ''">
         <span class="flex w-4 justify-center" :class="l.cls"><ReleaseSpinner v-if="l.spin" /><template v-else>{{ l.icon }}</template></span><span>{{ l.text }}</span>
+      </div>
+      <div v-if="release.pr_error" data-testid="pr-error" class="mt-3 flex flex-col gap-1 rounded-[10px] border border-fail p-3 text-fail">
+        <b>The release PR could not be opened</b>
+        <span class="font-mono text-[12px]">{{ release.pr_error }}</span>
+        <span class="text-text-secondary">The dashboard keeps trying. You can also open the pull request by hand on GitHub, from the branch <span class="font-mono">{{ release.branch }}</span> into main, without labels; the dashboard then continues with it.</span>
       </div>
       <div v-if="cutFailed" data-testid="cut-failed" class="mt-3 flex flex-wrap items-center gap-3 text-fail">
         <b>The cut failed</b>

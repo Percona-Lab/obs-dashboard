@@ -1781,3 +1781,81 @@ func TestSnapshotUnitRuleNeedsEveryReport(t *testing.T) {
 		t.Errorf("SyncState=%q SyncError=%q, want success with no error", rel.SyncState, rel.SyncError)
 	}
 }
+
+// GitHub refuses a pull request whose description is longer than 65536
+// characters. A release of several units can exceed that with its changelog
+// sections alone: the description then names the units and where their
+// changelogs are, and stays far below the limit.
+func TestPullBodyFitsGitHubLimit(t *testing.T) {
+	var units []UnitState
+	for _, v := range []string{"14", "15", "16", "17", "18"} {
+		units = append(units, UnitState{
+			Unit: "ppg:staging:" + v, ReleaseDir: "root/ppg/releases/" + v, ReleaseID: v + ".1-1",
+			Changelog: "## [" + v + ".1-1] - 2026-11-12\n\n" + strings.Repeat("- a changelog line that is fairly long\n", 380),
+		})
+	}
+	body := pullBody(units)
+	if len(body) > maxPullBody {
+		t.Fatalf("body is %d bytes, limit %d", len(body), maxPullBody)
+	}
+	for _, u := range units {
+		if !strings.Contains(body, u.ReleaseID) || !strings.Contains(body, u.Unit) || !strings.Contains(body, u.ReleaseDir+"/CHANGELOG.md") {
+			t.Errorf("body does not name unit %s with its changelog file:\n%s", u.Unit, body)
+		}
+	}
+	if strings.Contains(body, "a changelog line") {
+		t.Errorf("an oversized body must not carry the changelog text")
+	}
+
+	// A body that fits is the changelog sections, as before.
+	small := pullBody(units[:1])
+	if !strings.HasPrefix(small, "## [14.1-1]") || !strings.Contains(small, "a changelog line") {
+		t.Errorf("small body = %.80q", small)
+	}
+}
+
+// A title is limited too.
+func TestPullTitleIsBounded(t *testing.T) {
+	var units []UnitState
+	for i := 0; i < 40; i++ {
+		units = append(units, UnitState{ReleaseID: fmt.Sprintf("common-upgrade-extras-%d", i)})
+	}
+	title := pullTitle(units)
+	if len(title) > 200 || !strings.HasPrefix(title, "Release common-upgrade-extras-0, ") || !strings.HasSuffix(title, " more") {
+		t.Errorf("title (%d bytes) = %q", len(title), title)
+	}
+	if got := pullTitle(units[:2]); got != "Release common-upgrade-extras-0, common-upgrade-extras-1" {
+		t.Errorf("short title = %q", got)
+	}
+}
+
+// When GitHub refuses to open the PR the release says so, with nothing but
+// the method, path and status, and the next refresh tries again.
+func TestSnapshotReportsPRThatCannotBeOpened(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.gh.createErr = &APIError{Method: "POST", Path: "/repos/x/pulls", Status: 422}
+
+	rel := fx.oneRelease(t)
+	if rel.Step != StepCutting || rel.PR != 0 {
+		t.Fatalf("Step=%q PR=%d, want cutting with no PR", rel.Step, rel.PR)
+	}
+	if rel.PRError != "github POST /repos/x/pulls: HTTP 422" {
+		t.Errorf("PRError = %q", rel.PRError)
+	}
+	b, _ := json.Marshal(rel)
+	if !strings.Contains(string(b), `"pr_error":"github POST /repos/x/pulls: HTTP 422"`) {
+		t.Errorf("json = %s", b)
+	}
+
+	fx.gh.createErr = nil
+	fx.svc.Invalidate()
+	rel = fx.oneRelease(t)
+	if rel.PR == 0 || rel.PRError != "" || rel.Step != StepChangelog {
+		t.Errorf("after GitHub accepts: PR=%d PRError=%q Step=%q", rel.PR, rel.PRError, rel.Step)
+	}
+	if n := len(fx.gh.callsOf("CreatePull")); n != 2 {
+		t.Errorf("CreatePull calls = %d, want 2", n)
+	}
+}

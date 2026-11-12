@@ -790,8 +790,9 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 		p, err := s.gh.CreatePull(ctx, c.branch, pullTitle(rel.Units), pullBody(rel.Units))
 		if err != nil {
 			// Not fatal: the release stays at the cutting step and the next
-			// refresh tries again.
+			// refresh tries again. The user is told why it is waiting.
 			slog.Warn("release: open pull request", "branch", c.branch, "err", err)
+			rel.PRError = publicError(err)
 		} else {
 			f.Pull = &p
 		}
@@ -1226,12 +1227,23 @@ func (s *Service) unitState(ctx context.Context, yamlPath string, ref fileRef, d
 // pullTitle and pullBody are the text of the PR the dashboard opens. They are
 // built from the release content only: the repository is public and must not
 // learn who is using the dashboard.
+// GitHub refuses a pull request whose title is longer than 256 characters or
+// whose body is longer than 65536. Both are kept well below.
+const (
+	maxPullTitle = 200
+	maxPullBody  = 60000
+)
+
 func pullTitle(units []UnitState) string {
 	ids := make([]string, 0, len(units))
 	for _, u := range units {
 		ids = append(ids, u.ReleaseID)
 	}
-	return "Release " + strings.Join(ids, ", ")
+	title := "Release " + strings.Join(ids, ", ")
+	for n := len(ids) - 1; len(title) > maxPullTitle && n > 0; n-- {
+		title = fmt.Sprintf("Release %s and %d more", strings.Join(ids[:n], ", "), len(ids)-n)
+	}
+	return title
 }
 
 func pullBody(units []UnitState) string {
@@ -1248,7 +1260,17 @@ func pullBody(units []UnitState) string {
 	if len(sections) == 0 {
 		return ""
 	}
-	return strings.Join(sections, "\n\n") + "\n"
+	body := strings.Join(sections, "\n\n") + "\n"
+	if len(body) <= maxPullBody {
+		return body
+	}
+	// Too long for GitHub: name the units and where their changelogs are.
+	var b strings.Builder
+	b.WriteString("This release covers these units. The changelog of each one is in the file named, in this pull request.\n\n")
+	for _, u := range units {
+		fmt.Fprintf(&b, "- `%s` (`%s`): `%s/CHANGELOG.md`\n", u.ReleaseID, u.Unit, u.ReleaseDir)
+	}
+	return b.String()
 }
 
 // pullable reports whether a PR can be opened for units: there is at least
