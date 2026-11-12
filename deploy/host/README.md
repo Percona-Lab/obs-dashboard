@@ -17,7 +17,7 @@ every GitHub release as `obs-dashboard-host-vX.Y.Z.tar.gz`, with a
 - `jq` and `curl`.
 - A reverse proxy that terminates TLS for the public URL and forwards to
   `127.0.0.1:4000`. Turn response buffering off and use a long read timeout:
-  `/api/stream` is a Server-Sent Events stream.
+  `/api/stream` and `/api/logs/stream` are Server-Sent Events streams.
 
 ## Layout
 
@@ -128,7 +128,7 @@ there, so the next run does not revert it.
 
 - Signed-in users can watch the backend's log live in Settings, on the "Server log" tab.
 - The backend also writes it to `/var/lib/obs-dashboard/obs-dashboard.log`, capped at 10 MB with one previous file kept as `obs-dashboard.log.1`.
-- `journalctl -u obs-dashboard` shows the same lines.
+- `journalctl -u obs-dashboard` still has everything, including the HTTP request log and panic stacks. The file and the tab hold only the application's own log lines.
 
 ## Manual rollback to an earlier version
 

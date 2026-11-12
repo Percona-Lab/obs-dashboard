@@ -132,7 +132,10 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 	if logs != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(authSvc.RequireUser)
-			r.Get("/api/logs/stream", logStreamHandler(logs))
+			r.Get("/api/logs/stream", logStreamHandler(logs, func(r *http.Request) bool {
+				_, ok := authSvc.EmailFor(r)
+				return ok
+			}))
 		})
 	}
 	return r

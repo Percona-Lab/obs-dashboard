@@ -15,9 +15,14 @@ type LogSource interface {
 	Subscribe(n int) (tail []string, lines <-chan string, cancel func())
 }
 
+// logHeartbeat is how often an open stream pings and re-checks the viewer.
+var logHeartbeat = 25 * time.Second
+
 // logStreamHandler serves the server log as server-sent events: one "reset"
-// event holding the recent lines, then one "line" event per new line.
-func logStreamHandler(src LogSource) http.HandlerFunc {
+// event holding the recent lines, then one "line" event per new line. On
+// every heartbeat it asks stillAllowed about the original request and ends the
+// stream when the viewer is no longer signed in.
+func logStreamHandler(src LogSource, stillAllowed func(*http.Request) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -44,7 +49,7 @@ func logStreamHandler(src LogSource) http.HandlerFunc {
 		fmt.Fprintf(w, "event: reset\ndata: %s\n\n", reset)
 		flusher.Flush()
 
-		heartbeat := time.NewTicker(25 * time.Second)
+		heartbeat := time.NewTicker(logHeartbeat)
 		defer heartbeat.Stop()
 
 		for {
@@ -52,6 +57,9 @@ func logStreamHandler(src LogSource) http.HandlerFunc {
 			case <-r.Context().Done():
 				return
 			case <-heartbeat.C:
+				if !stillAllowed(r) {
+					return
+				}
 				fmt.Fprint(w, ": ping\n\n")
 				flusher.Flush()
 			case line, ok := <-lines:

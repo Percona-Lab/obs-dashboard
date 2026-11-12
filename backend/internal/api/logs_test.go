@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -47,6 +48,12 @@ func (f *fakeLogSource) wasCancelled() bool {
 
 func logsRouter(t *testing.T, src LogSource) (http.Handler, string) {
 	t.Helper()
+	h, sid, _ := logsRouterDB(t, src)
+	return h, sid
+}
+
+func logsRouterDB(t *testing.T, src LogSource) (http.Handler, string, *sql.DB) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "obsboard.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +66,7 @@ func logsRouter(t *testing.T, src LogSource) (http.Handler, string) {
 	}
 	obsClient := obs.SingleFleet(obs.NewClient(stubOBSServer(t).URL, "user", "pass"), "isv:percona")
 	r := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, nil, src)
-	return r, sid
+	return r, sid, db
 }
 
 // syncBuf is a ResponseWriter whose body can be read while the handler runs.
@@ -172,5 +179,59 @@ func TestLogStreamAbsentWithoutSource(t *testing.T) {
 	h, sid := logsRouter(t, nil)
 	if rec := callRec(h, http.MethodGet, "/api/logs/stream", "", sid); rec.Code != http.StatusNotFound {
 		t.Fatalf("no source: %d", rec.Code)
+	}
+}
+
+func TestLogStreamEndsWhenSessionIsGone(t *testing.T) {
+	old := logHeartbeat
+	logHeartbeat = 20 * time.Millisecond
+	t.Cleanup(func() { logHeartbeat = old })
+
+	src := newFakeLogSource("a")
+	h, sid, db := logsRouterDB(t, src)
+	rec, _, done := startLogStream(t, h, sid)
+	waitFor(t, "reset event", func() bool { return strings.Contains(rec.text(), "event: reset") })
+
+	if err := auth.NewStore(db).DeleteSession(sid); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler kept streaming after the session was deleted")
+	}
+	if !src.wasCancelled() {
+		t.Fatal("subscription was not cancelled")
+	}
+}
+
+func TestLogStreamEndsWhenUserLeavesAllowlist(t *testing.T) {
+	old := logHeartbeat
+	logHeartbeat = 20 * time.Millisecond
+	t.Cleanup(func() { logHeartbeat = old })
+
+	src := newFakeLogSource("a")
+	h, _, db := logsRouterDB(t, src)
+	st := auth.NewStore(db)
+	if _, err := st.AddUser("bob@percona.com", "alice@percona.com", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSession("bob@percona.com", time.Now(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _, done := startLogStream(t, h, sid)
+	waitFor(t, "reset event", func() bool { return strings.Contains(rec.text(), "event: reset") })
+
+	if err := st.RemoveUser("bob@percona.com"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler kept streaming after the user was removed")
+	}
+	if !src.wasCancelled() {
+		t.Fatal("subscription was not cancelled")
 	}
 }

@@ -4,6 +4,7 @@ dist/
 *.db
 data/*.db
 data/*.db-journal
+data/obs-dashboard.log*
 .env
 backend/obsboard
 
