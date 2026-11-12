@@ -95,26 +95,34 @@ func UserFrom(ctx context.Context) (string, bool) {
 	return e, ok
 }
 
+// EmailFor resolves the request's session cookie to an allowed email. ok is
+// false when there is no valid session or the user is no longer allowed.
+func (s *Service) EmailFor(r *http.Request) (email string, ok bool) {
+	c, err := r.Cookie(sessionCookie)
+	if !s.Enabled() || err != nil || c.Value == "" {
+		return "", false
+	}
+	email, found, err := s.store.SessionEmail(c.Value, s.now())
+	if err != nil {
+		slog.Warn("auth: session lookup failed", "err", err)
+	}
+	if !found {
+		return "", false
+	}
+	allowed, err := s.IsAllowed(email)
+	if err != nil {
+		slog.Warn("auth: allowlist lookup failed", "err", err)
+		return "", false
+	}
+	return email, allowed
+}
+
 // LoadUser resolves the session cookie, if any, to an allowed email. Requests
 // without a valid session pass through anonymously.
 func (s *Service) LoadUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
-		if !s.Enabled() || err != nil || c.Value == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		email, ok, err := s.store.SessionEmail(c.Value, s.now())
-		if err != nil {
-			slog.Warn("auth: session lookup failed", "err", err)
-		}
-		if ok {
-			allowed, err := s.IsAllowed(email)
-			if err != nil {
-				slog.Warn("auth: allowlist lookup failed", "err", err)
-			} else if allowed {
-				r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, email))
-			}
+		if email, ok := s.EmailFor(r); ok {
+			r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, email))
 		}
 		next.ServeHTTP(w, r)
 	})

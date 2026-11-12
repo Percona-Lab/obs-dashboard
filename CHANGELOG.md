@@ -18,7 +18,7 @@ an example value. See `deploy/host/README.md`.
 
 ### Host changes
 
-- No action needed. A log file appears at `/var/lib/obs-dashboard/obs-dashboard.log`. It is capped at 10 MB, with one previous file kept as `obs-dashboard.log.1`. `journalctl -u obs-dashboard` still shows the same lines.
+- No action needed. A log file appears at `/var/lib/obs-dashboard/obs-dashboard.log`. It is capped at 10 MB, with one previous file kept as `obs-dashboard.log.1`. The journal (`journalctl -u obs-dashboard`) still has everything, including the HTTP request log and panic stacks; the file and the Settings tab hold only the application's own log lines.
 
 ## [0.2.6] - 2026-11-12
 
