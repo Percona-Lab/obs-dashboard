@@ -124,6 +124,12 @@ there, so the next run does not revert it.
    systemctl reset-failed obs-dashboard-apply.service obs-dashboard-apply.path && systemctl restart obs-dashboard-apply.path
    ```
 
+## Logs
+
+- Signed-in users can watch the backend's log live in Settings, on the "Server log" tab.
+- The backend also writes it to `/var/lib/obs-dashboard/obs-dashboard.log`, capped at 10 MB with one previous file kept as `obs-dashboard.log.1`.
+- `journalctl -u obs-dashboard` shows the same lines.
+
 ## Manual rollback to an earlier version
 
 The UI never downgrades. To go back to an earlier version yourself:
