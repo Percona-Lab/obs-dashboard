@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-12
+
 ### Added
 
 - The Release tab approves the workflow runs GitHub holds on a release PR
