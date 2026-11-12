@@ -29,7 +29,7 @@ describe('ReleaseWizard', () => {
     const queued = mountW({ ...base, cut: { state: 'queued', url: '' } })
     expect(spin(queued, 'Starting the cut on GitHub')).toBe(true)
     expect(spin(queued, 'Generating release files and changelogs')).toBe(false)
-    expect(queued.findAll('[data-testid="spinner"]')).toHaveLength(1)
+    expect(queued.findAll('[data-testid="cut-progress"] [data-testid="spinner"]')).toHaveLength(1)
 
     const running = mountW({ ...base, cut: { state: 'running', url: '' } })
     expect(spin(running, 'Starting the cut on GitHub')).toBe(false)
@@ -112,6 +112,43 @@ describe('ReleaseWizard', () => {
     expect(w.get('[data-testid="sync-error"]').text()).toContain('ppg:releases:16:tde was not populated on any instance.')
     expect(w.find('[data-testid="retry-sync"]').exists()).toBe(true)
     expect(mountW({ step: 'sync', sync_state: 'running', sync_error: '' }).find('[data-testid="sync-error"]').exists()).toBe(false)
+  })
+
+  it('marks the current step and says what is happening in it', () => {
+    const status = (o: Parameters<typeof mountW>[0]) => {
+      const w = mountW(o)
+      const el = w.get('[data-testid="step-status"]')
+      return `${el.attributes('data-kind')}|${w.get('[data-testid="step-title"]').text()}|${w.get('[data-testid="step-status-text"]').text()}`
+    }
+    const lane = (state: 'success' | 'failure') => ({ name: 'l', unit: 'u', jenkins_url: '', url: '', state })
+    const qa = (state: 'waiting' | 'running' | 'finished' | 'failure', lanes: ReturnType<typeof lane>[] = []) => ({ state, lanes, url: '', error: '' })
+
+    expect(status({ step: 'cutting', pr: 0, pr_url: '', cut: { state: 'queued', url: '' } })).toBe('waiting|Step 2 of 5 · Changelog|Starting the cut on GitHub')
+    expect(status({ step: 'cutting', pr: 0, pr_url: '', cut: { state: 'running', url: '' } })).toBe('waiting|Step 2 of 5 · Changelog|Generating the release files and changelogs')
+    expect(status({ step: 'cutting', pr: 0, pr_url: '', cut: { state: 'approval', url: '' } })).toBe('waiting|Step 2 of 5 · Changelog|Waiting for approval on GitHub')
+    expect(status({ step: 'cutting', pr: 0, pr_url: '', cut: { state: 'failure', url: '' } })).toBe('failed|Step 2 of 5 · Changelog|The cut failed')
+    expect(status({ step: 'changelog' })).toBe('action|Step 2 of 5 · Changelog|Your turn: review the changelog, then approve it to start the sync')
+    expect(status({ step: 'sync', sync_state: 'running' })).toBe('waiting|Step 3 of 5 · Pre-release sync|Copying staging into the pre-release')
+    expect(status({ step: 'sync', sync_state: 'failure' })).toBe('failed|Step 3 of 5 · Pre-release sync|The pre-release sync failed')
+    expect(status({ step: 'qa', sync_state: 'success', qa: qa('waiting') })).toBe('action|Step 4 of 5 · QA|Your turn: approve the QA run')
+    expect(status({ step: 'qa', sync_state: 'success', qa: qa('running') })).toBe('waiting|Step 4 of 5 · QA|QA is running')
+    expect(status({ step: 'qa', sync_state: 'success', qa: qa('failure') })).toBe('failed|Step 4 of 5 · QA|QA could not start')
+    expect(status({ step: 'qa', sync_state: 'success', qa: qa('finished', [lane('success')]) })).toBe('action|Step 4 of 5 · QA|Your turn: QA passed, release when ready')
+    expect(status({ step: 'qa', sync_state: 'success', qa: qa('finished', [lane('failure'), lane('success')]) })).toBe('action|Step 4 of 5 · QA|Your turn: QA finished with 1 failed lane, review before releasing')
+    expect(status({ step: 'releasing', final: null })).toBe('waiting|Step 5 of 5 · Release|Copying the pre-release into the release projects')
+    expect(status({ step: 'releasing', final: { tags: [], instances: [], github_releases: '', cleanup: '', state: 'failure', url: '' } })).toBe('failed|Step 5 of 5 · Release|The final sync failed')
+  })
+
+  it('shows the step bar with done, current and upcoming steps', () => {
+    const w = mountW({ step: 'sync', sync_state: 'running' })
+    const steps = w.findAll('[data-testid="step"]')
+    expect(steps.map((s) => s.attributes('data-state'))).toEqual(['done', 'done', 'on', 'todo', 'todo'])
+    expect(steps.map((s) => s.attributes('aria-current'))).toEqual([undefined, undefined, 'step', undefined, undefined])
+    expect(steps[0].get('[data-testid="step-mark"]').text()).toBe('✓')
+    expect(steps[2].get('[data-testid="step-mark"]').text()).toBe('3')
+    expect(steps[3].get('[data-testid="step-mark"]').text()).toBe('4')
+    expect(w.get('[data-testid="step-status"]').find('[data-testid="spinner"]').exists()).toBe(true)
+    expect(mountW({ step: 'changelog' }).get('[data-testid="step-status"]').find('[data-testid="spinner"]').exists()).toBe(false)
   })
 
   it('hides abandon while releasing', () => {

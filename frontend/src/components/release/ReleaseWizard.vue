@@ -92,6 +92,43 @@ const progress = computed<Line[]>(() => {
   ]
 })
 const waitingState = (s: string | undefined) => s === 'queued' || s === 'running'
+
+// What is happening in the current step, in one line: waiting on GitHub,
+// waiting on the user ("Your turn"), or failed.
+type Status = { kind: 'waiting' | 'action' | 'failed'; text: string }
+const status = computed<Status>(() => {
+  const r = props.release
+  const wait = (text: string): Status => ({ kind: 'waiting', text })
+  const act = (text: string): Status => ({ kind: 'action', text: `Your turn: ${text}` })
+  const fail = (text: string): Status => ({ kind: 'failed', text })
+  switch (r.step) {
+    case 'cutting': {
+      const st = r.cut?.state
+      if (st === 'failure') return fail('The cut failed')
+      if (st === 'approval') return wait('Waiting for approval on GitHub')
+      if (st === 'running') return wait('Generating the release files and changelogs')
+      if (st === 'success') return wait('Opening the release PR')
+      return wait('Starting the cut on GitHub')
+    }
+    case 'changelog':
+      if (r.cut?.state === 'failure') return fail('The cut failed')
+      return act('review the changelog, then approve it to start the sync')
+    case 'sync':
+      if (r.sync_state === 'failure') return fail('The pre-release sync failed')
+      return wait('Copying staging into the pre-release')
+    case 'qa': {
+      const q = r.qa
+      if (!q || q.state === 'waiting') return act('approve the QA run')
+      if (q.state === 'failure') return fail('QA could not start')
+      if (q.state === 'running') return wait('QA is running')
+      const bad = q.lanes.filter((l) => l.state !== 'success').length
+      return bad ? act(`QA finished with ${bad} failed ${bad === 1 ? 'lane' : 'lanes'}, review before releasing`) : act('QA passed, release when ready')
+    }
+    default:
+      if (r.final?.state === 'failure') return fail('The final sync failed')
+      return wait('Copying the pre-release into the release projects')
+  }
+})
 </script>
 
 <template>
@@ -123,11 +160,27 @@ const waitingState = (s: string | undefined) => s === 'queued' || s === 'running
       This release PR comes from a fork, so the dashboard cannot change it. Manage it on GitHub.
     </div>
 
-    <ol data-testid="step-bar" class="m-0 flex list-none flex-wrap gap-[6px] p-0">
-      <li v-for="(s, i) in STEPS" :key="s" data-testid="step" :data-state="i < stepIndex ? 'done' : i === stepIndex ? 'on' : 'todo'"
-        class="min-w-[110px] flex-1 rounded-[8px] border px-[10px] py-2 text-[12px]"
-        :class="i < stepIndex ? 'border-ok text-ok' : i === stepIndex ? 'border-brand-purple text-text-primary' : 'border-border text-text-muted'">{{ i + 1 }} · {{ s }}</li>
-    </ol>
+    <nav aria-label="Release steps">
+      <ol data-testid="step-bar" class="m-0 flex list-none flex-wrap gap-[6px] p-0">
+        <li v-for="(s, i) in STEPS" :key="s" data-testid="step" :data-state="i < stepIndex ? 'done' : i === stepIndex ? 'on' : 'todo'"
+          :aria-current="i === stepIndex ? 'step' : undefined"
+          class="flex min-w-[130px] flex-1 items-center gap-2 rounded-[8px] border px-[10px] py-2 text-[12px]"
+          :class="i < stepIndex ? 'border-border text-text-secondary' : i === stepIndex ? 'border-2 border-brand-purple bg-brand-purple-tint font-bold text-text-primary' : 'border-border text-text-muted'">
+          <span data-testid="step-mark" aria-hidden="true" class="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
+            :class="i < stepIndex ? 'bg-ok text-white' : i === stepIndex ? 'bg-brand-purple text-white' : 'border border-border-strong text-text-muted'">{{ i < stepIndex ? '✓' : i + 1 }}</span>
+          <span>{{ s }}<span class="sr-only">{{ i < stepIndex ? ' (done)' : i === stepIndex ? ' (current step)' : ' (not started)' }}</span></span>
+        </li>
+      </ol>
+    </nav>
+
+    <div data-testid="step-status" :data-kind="status.kind" role="status" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border-l-4 px-3 py-[10px]"
+      :class="status.kind === 'failed' ? 'border-fail bg-fail-tint' : status.kind === 'action' ? 'border-brand-purple bg-brand-purple-tint' : 'border-border-strong bg-bg-muted'">
+      <b data-testid="step-title" class="text-[13px] text-text-primary">Step {{ stepIndex + 1 }} of {{ STEPS.length }} · {{ STEPS[stepIndex] }}</b>
+      <span class="flex items-center gap-2 text-[13px]" :class="status.kind === 'failed' ? 'text-fail' : 'text-text-primary'">
+        <ReleaseSpinner v-if="status.kind === 'waiting'" />
+        <span data-testid="step-status-text">{{ status.text }}</span>
+      </span>
+    </div>
 
     <div v-if="cutHeld" data-testid="cut-approval" class="flex flex-col gap-2 rounded-[10px] border border-warn bg-warn-tint px-3 py-2 text-text-primary">
       <span class="flex items-start gap-2"><ReleaseSpinner class="mt-[2px]" /><span>Waiting for approval on GitHub. A person with write access must approve the workflow run before the cut starts.</span></span>

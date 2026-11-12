@@ -13,6 +13,11 @@ an example value. See `deploy/host/README.md`.
 
 ### Changed
 
+- The release wizard's step bar marks finished steps with a tick, highlights
+  the current step, and a status line below it says which step this is
+  ("Step 3 of 5 · Pre-release sync") and what is happening: waiting on
+  GitHub, your turn, or failed.
+
 - Every place the release wizard waits now shows a spinner: the stage of the
   cut in progress, the sync and the final sync before they start, instances
   and QA lanes that are queued or running, QA before its lanes exist, and a
