@@ -1849,3 +1849,80 @@ func TestSnapshotReportsPRThatCannotBeOpened(t *testing.T) {
 		t.Errorf("CreatePull calls = %d, want 2", n)
 	}
 }
+
+// heldRun is a run of the release PR's head that GitHub holds for approval.
+func heldRun(id int64, workflow, actor string) Run {
+	return Run{ID: id, WorkflowFile: workflow, Event: "pull_request", Actor: actor, HeadSHA: testHead,
+		Status: "completed", Conclusion: "action_required"}
+}
+
+func TestSnapshotApprovesRunsHeldAfterTheCutPush(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.withPR()
+	fx.gh.runs = append(fx.gh.runs,
+		heldRun(20, WorkflowPR, ActorActions),
+		heldRun(21, "project-config-check.yml", ActorActions),
+		heldRun(22, WorkflowPR, "someone"), // not the cut's push: left to a person
+	)
+
+	fx.oneRelease(t)
+	if got := fx.gh.callsOf("ApproveRun"); len(got) != 2 || got[0] != "ApproveRun 20" || got[1] != "ApproveRun 21" {
+		t.Fatalf("approved %v, want runs 20 and 21", got)
+	}
+	fx.svc.Invalidate()
+	fx.oneRelease(t)
+	if got := fx.gh.callsOf("ApproveRun"); len(got) != 2 {
+		t.Fatalf("approved again: %v", got)
+	}
+}
+
+func TestSnapshotApprovalRefusedIsAskedOnce(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.withCutRun("completed", "success")
+	fx.withPR()
+	fx.gh.runs = append(fx.gh.runs, heldRun(20, WorkflowPR, ActorActions))
+	fx.gh.approveErr = &APIError{Method: "POST", Path: "/x", Status: 403}
+
+	// The refusal does not fail the refresh; the run stays held on GitHub.
+	if rel := fx.oneRelease(t); rel.Step != StepChangelog {
+		t.Fatalf("step %q, want %q", rel.Step, StepChangelog)
+	}
+	fx.svc.Invalidate()
+	fx.oneRelease(t)
+	if got := fx.gh.callsOf("ApproveRun"); len(got) != 1 {
+		t.Fatalf("a refused approval was asked %d times, want 1", len(got))
+	}
+
+	// An error that is not GitHub's answer is tried again.
+	fx2 := newFixture(t)
+	fx2.withBranch()
+	fx2.withCutRun("completed", "success")
+	fx2.withPR()
+	fx2.gh.runs = append(fx2.gh.runs, heldRun(20, WorkflowPR, ActorActions))
+	fx2.gh.approveErr = errors.New("connection reset")
+	fx2.oneRelease(t)
+	fx2.svc.Invalidate()
+	fx2.oneRelease(t)
+	if got := fx2.gh.callsOf("ApproveRun"); len(got) != 2 {
+		t.Fatalf("a failed approval was asked %d times, want 2", len(got))
+	}
+}
+
+func TestSnapshotNeverApprovesForkRuns(t *testing.T) {
+	fx := newFixture(t)
+	fx.withBranch()
+	fx.gh.open = []Pull{{Number: 47, HeadRef: testBranch, HeadSHA: "forkhead", HeadRepo: "someone/obs-packaging", BaseRepo: fakeRepo}}
+	fx.gh.pullFiles[47] = []string{testYAML}
+	fx.gh.setFile("forkhead", testYAML, strings.Replace(cutYAML, "18.6-6", "18.6-7", 1))
+	held := heldRun(20, WorkflowPR, ActorActions)
+	held.HeadSHA = "forkhead"
+	fx.gh.runs = append(fx.gh.runs, held)
+
+	fx.snapshot(t)
+	if got := fx.gh.callsOf("ApproveRun"); len(got) != 0 {
+		t.Fatalf("approved a fork's run: %v", got)
+	}
+}

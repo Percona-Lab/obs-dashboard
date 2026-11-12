@@ -11,6 +11,15 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The Release tab approves the workflow runs GitHub holds on a release PR
+  after a re-cut. The cut workflow pushes the release branch as
+  `github-actions[bot]`, and GitHub then waits for a person to press "Approve
+  workflows to run" on the PR. The dashboard now approves those runs itself,
+  only for releases it cut and only for runs caused by that push. If GitHub
+  refuses, the run stays held and is approved on the PR as before.
+
 ## [0.2.5] - 2026-11-12
 
 ### Fixed

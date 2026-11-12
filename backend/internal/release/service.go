@@ -141,6 +141,7 @@ func (s *Service) pruneCaches() {
 	s.artifacts.prune(s.round)
 	s.commitFiles.prune(s.round)
 	s.closedPulls.prune(s.round)
+	s.approvals.prune(s.round)
 }
 
 // cacheSize counts the entries of the per-release caches.
@@ -148,7 +149,7 @@ func (s *Service) cacheSize() int {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	return len(s.pullFiles.m) + len(s.generated.m) + len(s.reports.m) + len(s.runJobs.m) +
-		len(s.jobAnnotations.m) + len(s.artifacts.m) + len(s.commitFiles.m) + len(s.closedPulls.m)
+		len(s.jobAnnotations.m) + len(s.artifacts.m) + len(s.commitFiles.m) + len(s.closedPulls.m) + len(s.approvals.m)
 }
 
 // unusable reports whether err means the file is absent or cannot be read as
@@ -322,6 +323,7 @@ type Service struct {
 	artifacts      factCache[artifactKey, artifact]    // finished run + artifact name
 	commitFiles    factCache[fileKey, commitFile]      // commit sha + path
 	closedPulls    factCache[string, struct{}]         // branch that has a closed PR
+	approvals      factCache[int64, struct{}]          // held run whose approval GitHub answered
 	tagPulls       map[string]tagPull                  // tag -> PR of the tagged commit
 	releasedTags   map[string]struct{}                 // tags that have a GitHub release
 
@@ -860,6 +862,38 @@ func cutUnits(audit []store.ReleaseAudit) []string {
 	return nil
 }
 
+// approveHeld approves the runs GitHub holds on the head of a dashboard
+// release because the cut workflow pushed it: a re-cut's push to a branch
+// that has a PR starts the PR's workflows as github-actions[bot], and those
+// wait for a person. The commit is the cut's own, so nothing is left to
+// review. Runs anyone else caused are not touched.
+//
+// Each run is asked once: when GitHub refuses, the run stays held and is
+// approved on the pull request page, as before. Only an error that is not
+// GitHub's answer is tried again by the next refresh.
+func (s *Service) approveHeld(ctx context.Context, branch, head string, runs []Run) {
+	for _, r := range runs {
+		if r.HeadSHA != head || r.Event != "pull_request" || r.Actor != ActorActions || !needsApproval(r) {
+			continue
+		}
+		if _, asked := cached(s, &s.approvals, r.ID); asked {
+			continue
+		}
+		err := s.gh.ApproveRun(ctx, r.ID)
+		var refused *APIError
+		switch {
+		case err == nil:
+			slog.Info("release: approved the run held after the cut", "branch", branch, "run", r.ID, "workflow", r.WorkflowFile)
+		case errors.As(err, &refused) && refused.Status < 500:
+			slog.Warn("release: GitHub refused to approve a held run; approve it on the pull request", "branch", branch, "run", r.ID, "err", err)
+		default:
+			slog.Warn("release: approve a held run", "branch", branch, "run", r.ID, "err", err)
+			continue
+		}
+		remember(s, &s.approvals, r.ID, struct{}{})
+	}
+}
+
 // readHead reads the PR-workflow runs of an open PR's head: sync cards with
 // their reports, and QA lanes.
 func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
@@ -870,6 +904,9 @@ func (s *Service) readHead(ctx context.Context, f *Facts, rel *Release) error {
 			return err
 		}
 		f.HeadRuns = runs
+		if rel.Dashboard && ownsBranch(*rel) {
+			s.approveHeld(ctx, rel.Branch, p.HeadSHA, runs)
+		}
 		for _, r := range runs {
 			if r.WorkflowFile != WorkflowPR || r.HeadSHA != p.HeadSHA || needsApproval(r) {
 				continue
