@@ -176,6 +176,12 @@ Other cut states **(review)**:
   shows "The cut failed", the run link and "Retry"; the editor is read-only
   and Save, Reset and Approve are refused until a cut succeeds.
 
+Every step of the wizard shows a step bar (finished steps ticked, the
+current step highlighted) and, below it, a status line: "Step N of 5 ·
+<name>" and what is happening in that step. The line has three kinds:
+waiting on GitHub (with a spinner), "Your turn" when the user has to act
+(review the changelog, approve QA, release), and failed **(user)**.
+
 Once the PR exists:
 
 - A release strip: units, PR number, who started it and when, "Abandon
