@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-12
+
 ### Changed
 
 - Every button of the Release tab shows a spinner from the click until the
