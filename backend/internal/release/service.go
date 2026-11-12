@@ -1227,12 +1227,8 @@ func (s *Service) unitState(ctx context.Context, yamlPath string, ref fileRef, d
 // pullTitle and pullBody are the text of the PR the dashboard opens. They are
 // built from the release content only: the repository is public and must not
 // learn who is using the dashboard.
-// GitHub refuses a pull request whose title is longer than 256 characters or
-// whose body is longer than 65536. Both are kept well below.
-const (
-	maxPullTitle = 200
-	maxPullBody  = 60000
-)
+// GitHub refuses a pull request whose title is longer than 256 characters.
+const maxPullTitle = 200
 
 func pullTitle(units []UnitState) string {
 	ids := make([]string, 0, len(units))
@@ -1246,29 +1242,16 @@ func pullTitle(units []UnitState) string {
 	return title
 }
 
+// pullBody is the description of the release PR: the units being released
+// and their release ids. The changelogs are in the PR's files.
 func pullBody(units []UnitState) string {
-	sections := make([]string, 0, len(units))
-	for _, u := range units {
-		text := u.Changelog
-		if u.Generated != nil {
-			text = *u.Generated
-		}
-		if text = strings.TrimSpace(text); text != "" {
-			sections = append(sections, text)
-		}
-	}
-	if len(sections) == 0 {
+	if len(units) == 0 {
 		return ""
 	}
-	body := strings.Join(sections, "\n\n") + "\n"
-	if len(body) <= maxPullBody {
-		return body
-	}
-	// Too long for GitHub: name the units and where their changelogs are.
 	var b strings.Builder
-	b.WriteString("This release covers these units. The changelog of each one is in the file named, in this pull request.\n\n")
+	b.WriteString("Units in this release:\n\n")
 	for _, u := range units {
-		fmt.Fprintf(&b, "- `%s` (`%s`): `%s/CHANGELOG.md`\n", u.ReleaseID, u.Unit, u.ReleaseDir)
+		fmt.Fprintf(&b, "- `%s`: `%s`\n", u.Unit, u.ReleaseID)
 	}
 	return b.String()
 }
