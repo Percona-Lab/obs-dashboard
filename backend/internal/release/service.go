@@ -842,6 +842,9 @@ func (s *Service) build(ctx context.Context, c candidate, cutRuns, releaseRuns [
 			at := a.At
 			rel.StartedBy, rel.StartedAt = a.Email, &at
 		}
+		if a.Action == auditSkipQA && rel.QA != nil && rel.HeadSHA != "" && a.Detail == rel.HeadSHA {
+			rel.QA.Skipped, rel.QA.SkippedBy = true, a.Email
+		}
 	}
 	if len(rel.Units) == 0 && !c.fork {
 		if u := cutUnits(audit); len(u) > 0 {

@@ -96,7 +96,7 @@ function shown(id: string): string | undefined {
   if (!r) return undefined
   return JSON.stringify([
     r.step, r.head_sha, r.cut?.state, r.sync_state, r.sync?.map((c) => c.state),
-    r.qa?.state, r.qa?.lanes?.length, r.final?.state,
+    r.qa?.state, r.qa?.skipped, r.qa?.lanes?.length, r.final?.state,
   ])
 }
 

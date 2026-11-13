@@ -18,7 +18,11 @@ const unfinished = computed(() => qa.value?.state === 'finished' ? lanes.value.f
 const passed = computed(() => lanes.value.filter((l) => l.state === 'success'))
 const running = computed(() => lanes.value.filter((l) => l.state === 'queued' || l.state === 'running'))
 const canAct = computed(() => props.release.dashboard)
-const canRelease = computed(() => canAct.value && qa.value?.state === 'finished' && !busy.value)
+const skipped = computed(() => !!qa.value?.skipped)
+// Release needs QA to have finished, or a user to have skipped it.
+const releasable = computed(() => qa.value?.state === 'finished' || skipped.value)
+const canRelease = computed(() => canAct.value && releasable.value && !busy.value)
+const canSkip = computed(() => canAct.value && !!qa.value && !releasable.value)
 
 interface Group { key: string; title: string; failed: Lane[]; passed: Lane[]; other: Lane[] }
 const groups = computed<Group[]>(() => {
@@ -50,7 +54,8 @@ const hasBad = computed(() => failed.value.length > 0 || unfinished.value.length
 const openRelease = () => { dialog.value = { id: props.release.id, head: props.release.head_sha, confirmFailed: hasBad.value } }
 const releaseBody = computed(() => {
   const parts: string[] = []
-  if (!lanes.value.length) parts.push('No QA tests ran for this release.')
+  if (qa.value?.state !== 'finished') parts.push('QA was skipped for this release.')
+  else if (!lanes.value.length) parts.push('No QA tests ran for this release.')
   if (failed.value.length) parts.push(`These QA lanes failed: ${failed.value.map((l) => l.name).join(', ')}.`)
   if (unfinished.value.length) parts.push(`These QA lanes did not finish: ${unfinished.value.map((l) => l.name).join(', ')}.`)
   parts.push(parts.length ? 'The release merges the PR and cannot be undone.' : 'This merges the release PR and cannot be undone.')
@@ -60,15 +65,28 @@ async function doRelease() {
   const d = dialog.value
   dialog.value = null
   // QA may have gone back to running while the dialog was open.
-  if (d && qa.value?.state === 'finished') await act(d.id, 'release', d.head, d.confirmFailed)
+  if (d && releasable.value) await act(d.id, 'release', d.head, d.confirmFailed)
 }
 const approve = () => act(props.release.id, 'approve-qa', props.release.head_sha)
 const retryQa = () => act(props.release.id, 'retry-qa', props.release.head_sha)
 const qaFailed = computed(() => qa.value?.state === 'failure')
+// Without QA: the release was skipped and QA has not finished since.
+const withoutQa = computed(() => qa.value?.state !== 'finished')
+// Pins the release id and head the user saw when the dialog opened.
+const skipDialog = ref<{ id: string; head: string } | null>(null)
+async function doSkip() {
+  const d = skipDialog.value
+  skipDialog.value = null
+  if (d) await act(d.id, 'skip-qa', d.head)
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-3">
+    <div v-if="skipped && withoutQa" data-testid="qa-skipped" role="status" class="rounded-[10px] border border-fail p-3 text-fail">
+      <b>QA skipped{{ qa?.skipped_by ? ` by ${qa.skipped_by}` : '' }}.</b> This version of the release PR can be released without QA.
+    </div>
+
     <template v-if="qa?.state === 'waiting' || !qa">
       <ReleaseRemovals :release="release" />
       <div v-if="qa" class="flex items-center gap-3">
@@ -120,14 +138,22 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
       <ReleaseRemovals :release="release" />
 
       <p v-if="failed.length" class="m-0 text-[12px] text-text-muted">Fix the failures outside the dashboard, then use "Update to latest main &amp; restart" above, or release anyway after a confirmation.</p>
+    </template>
 
+    <template v-if="qa && (qa.state !== 'waiting' || skipped)">
       <div v-if="canAct" class="flex items-center gap-3">
         <button type="button" data-testid="release" :disabled="!canRelease" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-brand-purple bg-brand-purple px-3 py-[6px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" @click="openRelease" :aria-busy="pending === 'release' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'release'" light />Release</button>
-        <small v-if="qaFailed" class="text-text-muted">Not available: QA did not run.</small>
-        <small v-else-if="qa.state !== 'finished'" class="text-text-muted">Available once every QA lane has finished.</small>
+        <small v-if="!releasable && qaFailed" class="text-text-muted">Not available: QA did not run.</small>
+        <small v-else-if="!releasable" class="text-text-muted">Available once every QA lane has finished.</small>
       </div>
     </template>
 
-    <ReleaseConfirm v-if="dialog" :title="hasBad ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="hasBad ? 'Release anyway' : 'Release'" :danger="hasBad" @confirm="doRelease" @cancel="dialog = null" />
+    <div v-if="canSkip" class="flex items-center gap-3">
+      <button type="button" data-testid="skip-qa" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-fail bg-transparent px-3 py-[6px] text-fail disabled:opacity-50" @click="skipDialog = { id: release.id, head: release.head_sha }" :aria-busy="pending === 'skip-qa' ? 'true' : undefined"><ReleaseSpinner v-if="pending === 'skip-qa'" />Skip QA</button>
+      <small class="text-text-muted">Makes "Release" available without QA. Asks for confirmation.</small>
+    </div>
+
+    <ReleaseConfirm v-if="dialog" :title="withoutQa ? 'Release without QA?' : hasBad ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="withoutQa ? 'Release without QA' : hasBad ? 'Release anyway' : 'Release'" :danger="hasBad || withoutQa" @confirm="doRelease" @cancel="dialog = null" />
+    <ReleaseConfirm v-if="skipDialog" title="Skip QA?" warning="The packages of this version of the release PR will not be tested." body="Skip QA only when it already passed on an earlier iteration of this release PR. After this, Release is available without QA, and a comment on the PR says that QA was skipped. Updating to latest main asks for QA again." confirm-label="Skip QA" danger @confirm="doSkip" @cancel="skipDialog = null" />
   </div>
 </template>

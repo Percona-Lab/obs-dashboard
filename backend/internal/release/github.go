@@ -88,6 +88,7 @@ type GitHub interface {
 	ClosePull(ctx context.Context, number int) error
 	MergePull(ctx context.Context, number int, headSHA string) error
 	AddLabel(ctx context.Context, number int, label string) error
+	Comment(ctx context.Context, number int, body string) error
 	RemoveLabel(ctx context.Context, number int, label string) error
 	Branches(ctx context.Context, prefix string) ([]Ref, error)
 	DeleteBranch(ctx context.Context, branch string) error
@@ -474,6 +475,13 @@ func (c *Client) MergePull(ctx context.Context, number int, headSHA string) erro
 func (c *Client) AddLabel(ctx context.Context, number int, label string) error {
 	_, _, err := c.do(ctx, http.MethodPost, c.repoPath("issues/"+strconv.Itoa(number)+"/labels"),
 		map[string][]string{"labels": {label}}, false)
+	return err
+}
+
+// Comment adds a comment to a pull request.
+func (c *Client) Comment(ctx context.Context, number int, body string) error {
+	_, _, err := c.do(ctx, http.MethodPost, c.repoPath("issues/"+strconv.Itoa(number)+"/comments"),
+		map[string]string{"body": body}, false)
 	return err
 }
 

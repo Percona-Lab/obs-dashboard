@@ -29,6 +29,7 @@ const (
 	auditRetrySync        = "retry_sync"
 	auditApproveQA        = "approve_qa"
 	auditRetryQA          = "retry_qa"
+	auditSkipQA           = "skip_qa" // Detail is the PR head the skip is for
 	auditRecut            = "recut"
 	auditRetryRelease     = "retry_release"
 	auditAbandon          = "abandon"
@@ -419,6 +420,33 @@ func (s *Service) ApproveQA(ctx context.Context, email, id, head string) error {
 	return nil
 }
 
+// skipQAComment is left on the release PR when QA is skipped. It does not name
+// the user: emails stay in the dashboard.
+const skipQAComment = "**QA skipped.** A dashboard user explicitly decided to release commit %s without running QA on it."
+
+// SkipQA lets the release be made without QA having finished for this head of
+// the PR. It says so on the PR. A re-cut gives the PR a new head, which the
+// skip does not cover.
+func (s *Service) SkipQA(ctx context.Context, email, id, head string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("%w: skipping QA needs the database", ErrBadRequest)
+	}
+	r, err := s.guard(ctx, id, head, func(r Release) bool {
+		return r.Step == StepQA && r.PR != 0 && r.QA != nil && r.QA.State != "finished" && !r.QA.Skipped
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.gh.Comment(ctx, r.PR, fmt.Sprintf(skipQAComment, r.HeadSHA)); err != nil {
+		return err
+	}
+	s.record(email, auditSkipQA, r, r.HeadSHA)
+	s.Invalidate()
+	return nil
+}
+
 // RetryQA starts QA again after it failed to start (the CDN wait or the lane
 // matrix failed): the qa-release label comes off and goes back on.
 func (s *Service) RetryQA(ctx context.Context, email, id, head string) error {
@@ -518,13 +546,13 @@ func (s *Service) unitsOf(r Release) ([]string, error) {
 	return nil, fmt.Errorf("%w: the units of this release are not known, abandon it and start again", ErrBadRequest)
 }
 
-// Release merges the release PR; the release workflow then publishes it. A
-// failed QA lane needs confirmFailed.
+// Release merges the release PR; the release workflow then publishes it. QA
+// must have finished or been skipped. A failed QA lane needs confirmFailed.
 func (s *Service) Release(ctx context.Context, email, id, head string, confirmFailed bool) error {
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
 	r, err := s.guard(ctx, id, head, func(r Release) bool {
-		return r.Step == StepQA && r.PR != 0 && r.QA != nil && r.QA.State == "finished"
+		return r.Step == StepQA && r.PR != 0 && r.QA != nil && (r.QA.State == "finished" || r.QA.Skipped)
 	})
 	if err != nil {
 		return err

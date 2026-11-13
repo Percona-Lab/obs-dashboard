@@ -132,6 +132,7 @@ describe('ReleaseWizard', () => {
     expect(status({ step: 'sync', sync_state: 'running' })).toBe('waiting|Step 3 of 5 · Pre-release sync|Copying staging into the pre-release')
     expect(status({ step: 'sync', sync_state: 'failure' })).toBe('failed|Step 3 of 5 · Pre-release sync|The pre-release sync failed')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('waiting') })).toBe('action|Step 4 of 5 · QA|Your turn: approve the QA run')
+    expect(status({ step: 'qa', sync_state: 'success', qa: { ...qa('waiting'), skipped: true } })).toBe('action|Step 4 of 5 · QA|Your turn: QA skipped, release when ready')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('running') })).toBe('waiting|Step 4 of 5 · QA|QA is running')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('failure') })).toBe('failed|Step 4 of 5 · QA|QA could not start')
     expect(status({ step: 'qa', sync_state: 'success', qa: qa('finished', [lane('success')]) })).toBe('action|Step 4 of 5 · QA|Your turn: QA passed, release when ready')
