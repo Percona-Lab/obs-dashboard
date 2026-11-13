@@ -29,7 +29,8 @@ const (
 	auditRetrySync        = "retry_sync"
 	auditApproveQA        = "approve_qa"
 	auditRetryQA          = "retry_qa"
-	auditSkipQA           = "skip_qa" // Detail is the PR head the skip is for
+	auditSkipQA           = "skip_qa"  // Detail is the PR head the skip is for
+	auditRerunQA          = "rerun_qa" // Detail is the lanes run again, one per line
 	auditRecut            = "recut"
 	auditRetryRelease     = "retry_release"
 	auditAbandon          = "abandon"
@@ -469,6 +470,52 @@ func (s *Service) RetryQA(ctx context.Context, email, id, head string) error {
 	}
 	s.noteRetry(auditRetryQA, id)
 	s.record(email, auditRetryQA, r, "")
+	s.Invalidate()
+	return nil
+}
+
+// RerunQA runs failed QA lanes again on the same QA run: the lane named lane,
+// or every failed one when lane is "". GitHub runs a job again only once the
+// whole run has completed, which is what QA "finished" means.
+func (s *Service) RerunQA(ctx context.Context, email, id, head, lane string) error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	// GitHub needs a moment to show the run as going again.
+	if err := s.retriedRecently(auditRerunQA, id); err != nil {
+		return err
+	}
+	r, err := s.guard(ctx, id, head, func(r Release) bool {
+		return r.Step == StepQA && r.PR != 0 && r.QA != nil && r.QA.State == "finished" && r.QA.runID != 0
+	})
+	if err != nil {
+		return err
+	}
+	var failed []string
+	var jobID int64
+	for _, l := range r.QA.Lanes {
+		if l.State != StateFailure {
+			continue
+		}
+		if lane == "" || l.Name == lane {
+			failed = append(failed, JobLanePrefix+l.Name)
+			jobID = l.jobID
+		}
+	}
+	switch {
+	case len(failed) == 0 && lane == "":
+		return fmt.Errorf("%w: no QA lane failed", ErrBadRequest)
+	case len(failed) == 0:
+		return fmt.Errorf("%w: %s is not a failed QA lane", ErrBadRequest, lane)
+	case lane == "":
+		err = s.gh.RerunFailedJobs(ctx, r.QA.runID)
+	default:
+		err = s.gh.RerunJob(ctx, jobID)
+	}
+	if err != nil {
+		return err
+	}
+	s.noteRetry(auditRerunQA, id)
+	s.record(email, auditRerunQA, r, strings.Join(failed, "\n"))
 	s.Invalidate()
 	return nil
 }

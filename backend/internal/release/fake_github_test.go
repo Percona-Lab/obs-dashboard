@@ -40,6 +40,7 @@ type fakeGitHub struct {
 	closeErr     error            // returned by ClosePull only
 	createErr    error            // returned by CreatePull only
 	approveErr   error            // returned by ApproveRun only
+	rerunErr     error            // returned by RerunJob and RerunFailedJobs only
 	fileErrs     map[string]error // "ref:path" -> error File returns for it
 	nextPR       int
 	block        chan struct{} // when non-nil, Branches waits for it to close
@@ -393,6 +394,54 @@ func (f *fakeGitHub) Dispatch(ctx context.Context, workflow string, inputs map[s
 	err := f.record("Dispatch", args...)
 	defer f.mu.Unlock()
 	return err
+}
+
+// rerun puts run runID back in progress with the jobs pick chooses queued again,
+// as GitHub does. f.mu must be held.
+func (f *fakeGitHub) rerun(runID int64, pick func(Job) bool) {
+	for i := range f.runs {
+		if f.runs[i].ID == runID {
+			f.runs[i].Status, f.runs[i].Conclusion = "in_progress", ""
+			f.runs[i].Attempt++
+		}
+	}
+	for i, j := range f.jobs[runID] {
+		if pick(j) {
+			f.jobs[runID][i].Status, f.jobs[runID][i].Conclusion = "queued", ""
+		}
+	}
+}
+
+func (f *fakeGitHub) RerunJob(ctx context.Context, jobID int64) error {
+	err := f.record("RerunJob", jobID)
+	defer f.mu.Unlock()
+	if err == nil {
+		err = f.rerunErr
+	}
+	if err != nil {
+		return err
+	}
+	for runID, jobs := range f.jobs {
+		for _, j := range jobs {
+			if j.ID == jobID {
+				f.rerun(runID, func(x Job) bool { return x.ID == jobID })
+			}
+		}
+	}
+	return nil
+}
+
+func (f *fakeGitHub) RerunFailedJobs(ctx context.Context, runID int64) error {
+	err := f.record("RerunFailedJobs", runID)
+	defer f.mu.Unlock()
+	if err == nil {
+		err = f.rerunErr
+	}
+	if err != nil {
+		return err
+	}
+	f.rerun(runID, func(x Job) bool { return x.Conclusion == "failure" })
+	return nil
 }
 
 // ApproveRun starts a held run, as GitHub does.

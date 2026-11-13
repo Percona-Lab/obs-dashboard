@@ -117,4 +117,4 @@ export interface HistoryPage {
 }
 
 export type ReleaseAction =
-  | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'retry-qa' | 'skip-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'
+  | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'retry-qa' | 'skip-qa' | 'rerun-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'

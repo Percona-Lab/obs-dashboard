@@ -88,7 +88,7 @@ func (fx *svcFixture) wantOneAudit(t *testing.T, action string) store.ReleaseAud
 
 func (fx *svcFixture) wantNoWrites(t *testing.T) {
 	t.Helper()
-	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Comment", "Dispatch", "MergePull", "ClosePull", "DeleteBranch"} {
+	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Comment", "Dispatch", "RerunJob", "RerunFailedJobs", "MergePull", "ClosePull", "DeleteBranch"} {
 		if c := fx.gh.callsOf(m); len(c) != 0 {
 			t.Errorf("unexpected GitHub write: %v", c)
 		}
@@ -1036,5 +1036,109 @@ func TestSkipQADoesNotCoverANewHead(t *testing.T) {
 	}
 	if err := fx.svc.Release(context.Background(), actor, "20261111T143210", testHead, false); !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestActionRerunQAOneLane(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	fx := newFixture(t)
+	fx.atQA(true, "completed", laneJob(200, "packages / pg_tde", "failure"), laneJob(201, "packages / pg_stat", "failure"), laneJob(202, "packages / pg_ok", "success"))
+	if err := fx.svc.RerunQA(ctx, actor, id, testHead, "packages / pg_tde"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fx.gh.callsOf("RerunJob"); len(got) != 1 || got[0] != "RerunJob 200" {
+		t.Errorf("RerunJob = %v", got)
+	}
+	if n := len(fx.gh.callsOf("RerunFailedJobs")); n != 0 {
+		t.Errorf("RerunFailedJobs called %d times", n)
+	}
+	if a := fx.wantOneAudit(t, "rerun_qa"); a.Detail != JobLanePrefix+"packages / pg_tde" {
+		t.Errorf("audit = %+v", a)
+	}
+	// The run is going again: the lane is not failed any more, the others keep
+	// their result, and nothing can be run again until it finishes.
+	qa := fx.snapshot(t).Releases[0].QA
+	if qa.State != "running" || qa.Lanes[0].State != StateQueued || qa.Lanes[1].State != StateFailure || qa.Lanes[2].State != StateSuccess {
+		t.Fatalf("qa = %+v", qa)
+	}
+	fx.clock.advance(61 * time.Second)
+	if err := fx.svc.RerunQA(ctx, actor, id, testHead, "packages / pg_stat"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("rerun while running: err = %v", err)
+	}
+}
+
+func TestActionRerunQAAllFailed(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	fx := newFixture(t)
+	fx.atQA(true, "completed", laneJob(200, "packages / pg_tde", "failure"), laneJob(201, "packages / pg_stat", "failure"), laneJob(202, "packages / pg_ok", "success"))
+	if err := fx.svc.RerunQA(ctx, actor, id, testHead, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := fx.gh.callsOf("RerunFailedJobs"); len(got) != 1 || !strings.HasPrefix(got[0], "RerunFailedJobs ") {
+		t.Errorf("RerunFailedJobs = %v", got)
+	}
+	if n := len(fx.gh.callsOf("RerunJob")); n != 0 {
+		t.Errorf("RerunJob called %d times", n)
+	}
+	want := JobLanePrefix + "packages / pg_tde\n" + JobLanePrefix + "packages / pg_stat"
+	if a := fx.wantOneAudit(t, "rerun_qa"); a.Detail != want {
+		t.Errorf("audit = %+v", a)
+	}
+	qa := fx.snapshot(t).Releases[0].QA
+	if qa.State != "running" || qa.Lanes[0].State != StateQueued || qa.Lanes[1].State != StateQueued || qa.Lanes[2].State != StateSuccess {
+		t.Fatalf("qa = %+v", qa)
+	}
+}
+
+func TestActionRerunQARefused(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	failedLane, passedLane := laneJob(200, "packages / pg_tde", "failure"), laneJob(201, "packages / pg_stat", "success")
+	cases := []struct {
+		name  string
+		setup func(fx *svcFixture)
+		head  string
+		lane  string
+		want  error
+	}{
+		{"QA still running", func(fx *svcFixture) {
+			fx.atQA(true, "in_progress", failedLane, Job{ID: 201, Name: JobLanePrefix + "packages / pg_stat", Status: "in_progress"})
+		}, testHead, "packages / pg_tde", ErrConflict},
+		{"QA not started", func(fx *svcFixture) { fx.atQA(false, "completed") }, testHead, "", ErrConflict},
+		{"stale head", func(fx *svcFixture) { fx.atQA(true, "completed", failedLane, passedLane) }, "oldhead", "", ErrConflict},
+		{"lane passed", func(fx *svcFixture) { fx.atQA(true, "completed", failedLane, passedLane) }, testHead, "packages / pg_stat", ErrBadRequest},
+		{"unknown lane", func(fx *svcFixture) { fx.atQA(true, "completed", failedLane, passedLane) }, testHead, "nope", ErrBadRequest},
+		{"nothing failed", func(fx *svcFixture) { fx.atQA(true, "completed", passedLane) }, testHead, "", ErrBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fx := newFixture(t)
+			c.setup(fx)
+			if err := fx.svc.RerunQA(ctx, actor, id, c.head, c.lane); !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+			fx.wantNoWrites(t)
+		})
+	}
+}
+
+func TestActionRerunQAGitHubRefuses(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	fx := newFixture(t)
+	fx.atQA(true, "completed", laneJob(200, "packages / pg_tde", "failure"))
+	fx.gh.rerunErr = errors.New("boom")
+	if err := fx.svc.RerunQA(ctx, actor, id, testHead, ""); err == nil {
+		t.Fatal("no error")
+	}
+	if rows := fx.auditRows(t); len(rows) != 0 {
+		t.Errorf("audit rows: %+v", rows)
+	}
+	// A refused re-run starts no cooldown.
+	fx.gh.rerunErr = nil
+	if err := fx.svc.RerunQA(ctx, actor, id, testHead, ""); err != nil {
+		t.Fatal(err)
+	}
+	// An accepted one does, even if GitHub still showed the run as finished.
+	if err := fx.svc.RerunQA(ctx, actor, id, testHead, ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second rerun: err = %v", err)
 	}
 }

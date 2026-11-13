@@ -170,6 +170,11 @@ async function act(id: string, action: ReleaseAction, head: string, confirmFaile
   return (await send(action, 'POST', `/releases/${encodeURIComponent(id)}/${action}`, { head, confirm_failed: confirmFailed }, id)) !== null
 }
 
+// rerunQa runs failed QA lanes again: the lane named lane, or every failed one when lane is ''.
+async function rerunQa(id: string, head: string, lane: string): Promise<boolean> {
+  return (await send('rerun-qa', 'POST', `/releases/${encodeURIComponent(id)}/rerun-qa`, { head, lane }, id)) !== null
+}
+
 // null on any failure, so callers can tell an error from an empty page.
 async function loadHistory(page: number): Promise<HistoryPage | null> {
   try {
@@ -231,6 +236,6 @@ export function useRelease() {
     enabled, snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy, pending,
     loadStatus, refresh: () => doRefresh(), loadUnits,
     start, stopPolling,
-    cut, saveChangelog, resetChangelog, act, loadHistory,
+    cut, saveChangelog, resetChangelog, act, rerunQa, loadHistory,
   }
 }

@@ -36,7 +36,7 @@ const readOnly = computed(() => ['sync', 'qa', 'releasing'].includes(props.relea
 const draftsKept = computed(() => props.release.step !== 'changelog' && hasDrafts(props.release.id))
 const ACTION_WORDS: Record<string, string> = {
   cut: 'started the release', save_changelog: 'edited the changelog', approve_changelog: 'approved the changelog',
-  retry_sync: 'retried the sync', approve_qa: 'approved the QA run', retry_qa: 'retried QA', skip_qa: 'skipped QA', recut: 'updated to latest main',
+  retry_sync: 'retried the sync', approve_qa: 'approved the QA run', retry_qa: 'retried QA', skip_qa: 'skipped QA', rerun_qa: 're-ran failed QA lanes', recut: 'updated to latest main',
   release: 'released', retry_release: 'retried the final sync', abandon: 'abandoned',
 }
 const when = (iso: string) => {

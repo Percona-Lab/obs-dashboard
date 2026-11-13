@@ -563,3 +563,23 @@ func TestClientComment(t *testing.T) {
 		t.Fatalf("body %v", body)
 	}
 }
+
+func TestClientRerun(t *testing.T) {
+	var got []string
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	ctx := context.Background()
+	if err := c.RerunJob(ctx, 200); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RerunFailedJobs(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	want := "POST /repos/percona/obs-packaging/actions/jobs/200/rerun,POST /repos/percona/obs-packaging/actions/runs/7/rerun-failed-jobs"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("requests = %v", got)
+	}
+}

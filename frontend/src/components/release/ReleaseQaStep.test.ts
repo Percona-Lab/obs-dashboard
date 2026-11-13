@@ -6,8 +6,9 @@ import ReleaseQaStep from './ReleaseQaStep.vue'
 import type { Lane, ReleaseState } from '../../types/release'
 
 const act = vi.fn(() => Promise.resolve(true))
+const rerunQa = vi.fn(() => Promise.resolve(true))
 const pending = ref('')
-vi.mock('../../composables/useRelease', () => ({ useRelease: () => ({ act, busy: ref(false), pending }) }))
+vi.mock('../../composables/useRelease', () => ({ useRelease: () => ({ act, rerunQa, busy: ref(false), pending }) }))
 
 const lane = (o: Partial<Lane>): Lane => ({ name: 'l', unit: 'u', jenkins_url: '', url: 'https://github.com/j/1', state: 'success', ...o })
 type QA = NonNullable<ReleaseState['qa']>
@@ -236,5 +237,42 @@ describe('ReleaseQaStep', () => {
   it('drops the skipped notice once QA finished after all', () => {
     const w = mountQ({ state: 'finished', lanes: [lane({})], skipped: true })
     expect(w.find('[data-testid="qa-skipped"]').exists()).toBe(false)
+  })
+
+  it('re-runs one failed lane after a confirmation', async () => {
+    const w = mountQ({ state: 'finished', lanes: [lane({ name: 'a', state: 'failure' }), lane({ name: 'b', state: 'failure' }), lane({ name: 'c' })] })
+    const btns = w.findAll('[data-testid="rerun-lane"]')
+    expect(btns).toHaveLength(2)
+    await btns[1].trigger('click')
+    expect(rerunQa).not.toHaveBeenCalled()
+    const dlg = w.get('[data-testid="release-confirm"]')
+    expect(dlg.text()).toContain('Re-run this QA lane?')
+    expect(dlg.text()).toContain('This runs b again')
+    expect(dlg.find('[data-testid="confirm-warning"]').exists()).toBe(false)
+    await w.get('[data-testid="confirm-cancel"]').trigger('click')
+    expect(rerunQa).not.toHaveBeenCalled()
+    await btns[1].trigger('click')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(rerunQa).toHaveBeenCalledWith('r1', 'abc', 'b')
+  })
+
+  it('re-runs every failed lane after a confirmation that names them', async () => {
+    const w = mountQ({ state: 'finished', lanes: [lane({ name: 'a', state: 'failure' }), lane({ name: 'b', state: 'failure' }), lane({ name: 'c' })] })
+    await w.get('[data-testid="rerun-all"]').trigger('click')
+    const dlg = w.get('[data-testid="release-confirm"]')
+    expect(dlg.text()).toContain('Re-run all failed QA lanes?')
+    expect(dlg.text()).toContain('This runs a, b again')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(rerunQa).toHaveBeenCalledWith('r1', 'abc', '')
+  })
+
+  it('offers re-runs only once QA finished with a failed lane, and not to a viewer', () => {
+    const none = (w: ReturnType<typeof mountQ>) => !w.find('[data-testid="rerun-lane"]').exists() && !w.find('[data-testid="rerun-all"]').exists()
+    expect(none(mountQ({ state: 'running', lanes: [lane({ state: 'failure' }), lane({ name: 'm', state: 'running' })] }))).toBe(true)
+    expect(none(mountQ({ state: 'finished', lanes: [lane({})] }))).toBe(true)
+    expect(none(mountQ({ state: 'finished', lanes: [lane({ state: 'failure' })] }, { dashboard: false }))).toBe(true)
+    const one = mountQ({ state: 'finished', lanes: [lane({ state: 'failure' })] })
+    expect(one.findAll('[data-testid="rerun-lane"]')).toHaveLength(1)
+    expect(one.find('[data-testid="rerun-all"]').exists()).toBe(true)
   })
 })
