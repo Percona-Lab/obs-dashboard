@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-11-13
+
 ### Added
 
 - The QA step of a release has a "Skip QA" button. After a warning and a confirmation it makes "Release" available without QA, for one version of the release PR, and leaves a comment on the PR. "Update to latest main & restart" asks for QA again.
