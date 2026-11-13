@@ -76,6 +76,10 @@ type QA struct {
 	Lanes []Lane `json:"lanes"`
 	URL   string `json:"url"`   // the QA run; "" while none is known
 	Error string `json:"error"` // why QA could not run; set with state failure
+	// Skipped says a user chose to release this head of the PR without QA.
+	// The release may then be made whatever State is.
+	Skipped   bool   `json:"skipped"`
+	SkippedBy string `json:"skipped_by"` // who skipped; "" unless Skipped
 }
 
 type Final struct {

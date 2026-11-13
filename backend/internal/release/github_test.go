@@ -545,3 +545,21 @@ func TestGitHubRunActorAndApprove(t *testing.T) {
 		t.Fatalf("approve %q %v", approved, err)
 	}
 }
+
+func TestClientComment(t *testing.T) {
+	var body map[string]string
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/repos/percona/obs-packaging/issues/7/comments" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	if err := c.Comment(context.Background(), 7, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if body["body"] != "hello" {
+		t.Fatalf("body %v", body)
+	}
+}

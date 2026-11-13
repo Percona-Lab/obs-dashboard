@@ -88,7 +88,7 @@ func (fx *svcFixture) wantOneAudit(t *testing.T, action string) store.ReleaseAud
 
 func (fx *svcFixture) wantNoWrites(t *testing.T) {
 	t.Helper()
-	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Dispatch", "MergePull", "ClosePull", "DeleteBranch"} {
+	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Comment", "Dispatch", "MergePull", "ClosePull", "DeleteBranch"} {
 		if c := fx.gh.callsOf(m); len(c) != 0 {
 			t.Errorf("unexpected GitHub write: %v", c)
 		}
@@ -531,7 +531,7 @@ func TestActionForkRefused(t *testing.T) {
 			t.Errorf("%s: err = %v, want ErrConflict", name, err)
 		}
 	}
-	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Dispatch", "MergePull", "ClosePull", "DeleteBranch"} {
+	for _, m := range []string{"AmendFile", "AddLabel", "RemoveLabel", "Comment", "Dispatch", "MergePull", "ClosePull", "DeleteBranch"} {
 		if c := fx.gh.callsOf(m); len(c) != 0 {
 			t.Errorf("fork: %v", c)
 		}
@@ -936,4 +936,105 @@ func TestActionAbandonFailedFirstCutRefused(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	fx.wantNoWrites(t)
+}
+
+func TestActionSkipQA(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	fx := newFixture(t)
+	fx.atQA(false, "completed")
+	// Not released before the skip.
+	if err := fx.svc.Release(ctx, actor, id, testHead, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("release before the skip: err = %v", err)
+	}
+	if err := fx.svc.SkipQA(ctx, actor, id, testHead); err != nil {
+		t.Fatal(err)
+	}
+	got := fx.gh.callsOf("Comment")
+	if len(got) != 1 || !strings.HasPrefix(got[0], "Comment 415 ") || !strings.Contains(got[0], "QA skipped") || !strings.Contains(got[0], testHead) {
+		t.Errorf("Comment = %v", got)
+	}
+	if strings.Contains(got[0], actor) {
+		t.Errorf("the comment names the user: %q", got[0])
+	}
+	if a := fx.wantOneAudit(t, "skip_qa"); a.Detail != testHead {
+		t.Errorf("audit = %+v", a)
+	}
+	rel := fx.snapshot(t).Releases[0]
+	if rel.QA == nil || !rel.QA.Skipped || rel.QA.SkippedBy != actor || rel.QA.State != "waiting" {
+		t.Fatalf("qa = %+v", rel.QA)
+	}
+	// A second skip is refused, and leaves no second comment.
+	if err := fx.svc.SkipQA(ctx, actor, id, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second skip: err = %v", err)
+	}
+	if n := len(fx.gh.callsOf("Comment")); n != 1 {
+		t.Fatalf("Comment called %d times", n)
+	}
+	if err := fx.svc.Release(ctx, actor, id, testHead, false); err != nil {
+		t.Fatalf("release after the skip: %v", err)
+	}
+	if got := fx.gh.callsOf("MergePull"); len(got) != 1 || got[0] != "MergePull 415 "+testHead {
+		t.Errorf("MergePull = %v", got)
+	}
+}
+
+func TestActionSkipQAWhileRunningStillNeedsConfirmForFailedLanes(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	fx := newFixture(t)
+	fx.atQA(true, "in_progress", laneJob(200, "packages / pg_tde", "failure"), Job{ID: 201, Name: JobLanePrefix + "packages / pg_stat", Status: "in_progress"})
+	if err := fx.svc.SkipQA(ctx, actor, id, testHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.Release(ctx, actor, id, testHead, false); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("err = %v", err)
+	}
+	if err := fx.svc.Release(ctx, actor, id, testHead, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestActionSkipQARefused(t *testing.T) {
+	ctx, id := context.Background(), "20261111T143210"
+	// QA finished: Release is available already.
+	fx := newFixture(t)
+	fx.atQA(true, "completed", laneJob(200, "packages / pg_tde", "success"))
+	if err := fx.svc.SkipQA(ctx, actor, id, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("finished QA: err = %v", err)
+	}
+	fx.wantNoWrites(t)
+	// Not at the QA step.
+	fx = newFixture(t)
+	fx.atChangelog()
+	if err := fx.svc.SkipQA(ctx, actor, id, testHead); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changelog step: err = %v", err)
+	}
+	fx.wantNoWrites(t)
+	// A head the user did not see.
+	fx = newFixture(t)
+	fx.atQA(false, "completed")
+	if err := fx.svc.SkipQA(ctx, actor, id, "otherhead"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale head: err = %v", err)
+	}
+	fx.wantNoWrites(t)
+	// The comment could not be left: nothing is skipped.
+	fx.gh.commentErr = errors.New("boom")
+	if err := fx.svc.SkipQA(ctx, actor, id, testHead); err == nil {
+		t.Fatal("skipped although the comment failed")
+	}
+	if rel := fx.snapshot(t).Releases[0]; rel.QA.Skipped {
+		t.Fatal("skipped although the comment failed")
+	}
+}
+
+func TestSkipQADoesNotCoverANewHead(t *testing.T) {
+	fx := newFixture(t)
+	fx.atQA(false, "completed")
+	// The skip of an earlier iteration of the PR.
+	fx.recordCut(t, "skip_qa", "oldhead")
+	if rel := fx.snapshot(t).Releases[0]; rel.QA.Skipped {
+		t.Fatal("a skip of another head counts")
+	}
+	if err := fx.svc.Release(context.Background(), actor, "20261111T143210", testHead, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
 }

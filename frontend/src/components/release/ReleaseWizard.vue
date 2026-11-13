@@ -36,7 +36,7 @@ const readOnly = computed(() => ['sync', 'qa', 'releasing'].includes(props.relea
 const draftsKept = computed(() => props.release.step !== 'changelog' && hasDrafts(props.release.id))
 const ACTION_WORDS: Record<string, string> = {
   cut: 'started the release', save_changelog: 'edited the changelog', approve_changelog: 'approved the changelog',
-  retry_sync: 'retried the sync', approve_qa: 'approved the QA run', retry_qa: 'retried QA', recut: 'updated to latest main',
+  retry_sync: 'retried the sync', approve_qa: 'approved the QA run', retry_qa: 'retried QA', skip_qa: 'skipped QA', recut: 'updated to latest main',
   release: 'released', retry_release: 'retried the final sync', abandon: 'abandoned',
 }
 const when = (iso: string) => {
@@ -118,6 +118,7 @@ const status = computed<Status>(() => {
       return wait('Copying staging into the pre-release')
     case 'qa': {
       const q = r.qa
+      if (q?.skipped && q.state !== 'finished') return act('QA skipped, release when ready')
       if (!q || q.state === 'waiting') return act('approve the QA run')
       if (q.state === 'failure') return fail('QA could not start')
       if (q.state === 'running') return wait('QA is running')

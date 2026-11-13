@@ -35,6 +35,7 @@ type fakeGitHub struct {
 	calls        []string
 	err          error
 	hasClosedErr error            // returned by HasClosedPull only
+	commentErr   error            // returned by Comment only
 	deleteErr    error            // returned by DeleteBranch only
 	closeErr     error            // returned by ClosePull only
 	createErr    error            // returned by CreatePull only
@@ -241,6 +242,15 @@ func (f *fakeGitHub) MergePull(ctx context.Context, number int, headSHA string) 
 	f.open = append(f.open[:i], f.open[i+1:]...)
 	f.merged = append(f.merged, p)
 	return nil
+}
+
+func (f *fakeGitHub) Comment(ctx context.Context, number int, body string) error {
+	err := f.record("Comment", number, body)
+	defer f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return f.commentErr
 }
 
 func (f *fakeGitHub) AddLabel(ctx context.Context, number int, label string) error {

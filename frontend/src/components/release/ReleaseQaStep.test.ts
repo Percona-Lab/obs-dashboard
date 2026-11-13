@@ -176,4 +176,65 @@ describe('ReleaseQaStep', () => {
     expect(w.find('[data-testid="qa-failed"] a').exists()).toBe(false)
     expect(w.find('[data-testid="retry-qa"]').exists()).toBe(false)
   })
+
+  it('offers Skip QA while QA has not finished, behind a warning the user must confirm', async () => {
+    for (const qa of [{ state: 'waiting', lanes: [] }, { state: 'running', lanes: [lane({ state: 'running' })] }, { state: 'failure', lanes: [] }] as QAIn[]) {
+      document.body.innerHTML = ''
+      act.mockClear()
+      const w = mountQ(qa)
+      expect(w.find('[data-testid="qa-skipped"]').exists()).toBe(false)
+      await w.get('[data-testid="skip-qa"]').trigger('click')
+      expect(act).not.toHaveBeenCalled()
+      const dlg = w.get('[data-testid="release-confirm"]')
+      expect(dlg.get('[data-testid="confirm-warning"]').text()).toContain('will not be tested')
+      await w.get('[data-testid="confirm-cancel"]').trigger('click')
+      expect(act).not.toHaveBeenCalled()
+      expect(w.find('[data-testid="release-confirm"]').exists()).toBe(false)
+      await w.get('[data-testid="skip-qa"]').trigger('click')
+      await w.get('[data-testid="confirm-ok"]').trigger('click')
+      expect(act).toHaveBeenCalledWith('r1', 'skip-qa', 'abc')
+    }
+  })
+
+  it('does not offer Skip QA once QA finished, to a viewer, or after a skip', () => {
+    expect(mountQ({ state: 'finished', lanes: [lane({})] }).find('[data-testid="skip-qa"]').exists()).toBe(false)
+    expect(mountQ({ state: 'waiting', lanes: [] }, { dashboard: false }).find('[data-testid="skip-qa"]').exists()).toBe(false)
+    expect(mountQ({ state: 'waiting', lanes: [], skipped: true }).find('[data-testid="skip-qa"]').exists()).toBe(false)
+  })
+
+  it('keeps Release locked before a skip', () => {
+    expect(mountQ({ state: 'waiting', lanes: [] }).find('[data-testid="release"]').exists()).toBe(false)
+    const running = mountQ({ state: 'running', lanes: [lane({ state: 'running' })] })
+    expect((running.get('[data-testid="release"]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('unlocks Release after a skip, says who skipped, and confirms the release in red', async () => {
+    for (const qa of [{ state: 'waiting', lanes: [] }, { state: 'running', lanes: [lane({ state: 'running' })] }, { state: 'failure', lanes: [] }] as QAIn[]) {
+      document.body.innerHTML = ''
+      act.mockClear()
+      const w = mountQ({ ...qa, skipped: true, skipped_by: 'a@x.test' })
+      expect(w.get('[data-testid="qa-skipped"]').text()).toContain('QA skipped by a@x.test')
+      const btn = w.get('[data-testid="release"]')
+      expect((btn.element as HTMLButtonElement).disabled).toBe(false)
+      await btn.trigger('click')
+      const dlg = w.get('[data-testid="release-confirm"]')
+      expect(dlg.text()).toContain('Release without QA?')
+      expect(dlg.text()).toContain('QA was skipped for this release.')
+      await w.get('[data-testid="confirm-ok"]').trigger('click')
+      expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', false)
+    }
+  })
+
+  it('still asks to confirm failed lanes when QA was skipped while it ran', async () => {
+    const w = mountQ({ state: 'running', lanes: [lane({ name: 'bad', state: 'failure' }), lane({ name: 'slow', state: 'running' })], skipped: true })
+    await w.get('[data-testid="release"]').trigger('click')
+    expect(w.get('[data-testid="release-confirm"]').text()).toContain('These QA lanes failed: bad.')
+    await w.get('[data-testid="confirm-ok"]').trigger('click')
+    expect(act).toHaveBeenCalledWith('r1', 'release', 'abc', true)
+  })
+
+  it('drops the skipped notice once QA finished after all', () => {
+    const w = mountQ({ state: 'finished', lanes: [lane({})], skipped: true })
+    expect(w.find('[data-testid="qa-skipped"]').exists()).toBe(false)
+  })
 })

@@ -30,6 +30,7 @@ type ReleaseService interface {
 	RetrySync(ctx context.Context, email, id, head string) error
 	ApproveQA(ctx context.Context, email, id, head string) error
 	RetryQA(ctx context.Context, email, id, head string) error
+	SkipQA(ctx context.Context, email, id, head string) error
 	Recut(ctx context.Context, email, id, head string) error
 	Release(ctx context.Context, email, id, head string, confirmFailed bool) error
 	RetryRelease(ctx context.Context, email, id string) error
@@ -177,7 +178,7 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 	r.With(origin).Post("/api/release/releases/{id}/{action}", func(w http.ResponseWriter, req *http.Request) {
 		id, action := chi.URLParam(req, "id"), chi.URLParam(req, "action")
 		switch action {
-		case "approve-changelog", "retry-sync", "approve-qa", "retry-qa", "recut", "release", "retry-release", "abandon":
+		case "approve-changelog", "retry-sync", "approve-qa", "retry-qa", "skip-qa", "recut", "release", "retry-release", "abandon":
 		default:
 			http.NotFound(w, req)
 			return
@@ -200,6 +201,8 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 			err = svc.ApproveQA(ctx, email, id, body.Head)
 		case "retry-qa":
 			err = svc.RetryQA(ctx, email, id, body.Head)
+		case "skip-qa":
+			err = svc.SkipQA(ctx, email, id, body.Head)
 		case "recut":
 			err = svc.Recut(ctx, email, id, body.Head)
 		case "release":

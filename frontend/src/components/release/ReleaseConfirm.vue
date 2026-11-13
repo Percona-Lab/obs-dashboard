@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
-defineProps<{ title: string; body: string; confirmLabel: string; danger?: boolean }>()
+defineProps<{ title: string; body: string; confirmLabel: string; danger?: boolean; warning?: string }>()
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const cancelBtn = ref<HTMLButtonElement | null>(null)
 onMounted(() => cancelBtn.value?.focus())
@@ -11,6 +11,7 @@ onMounted(() => cancelBtn.value?.focus())
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="emit('cancel')" @keydown.esc="emit('cancel')">
     <div role="dialog" aria-modal="true" data-testid="release-confirm" class="w-[min(440px,92vw)] rounded-[14px] border border-border bg-bg-card p-5 text-[13px] text-text-secondary">
       <h3 class="m-0 mb-2 text-[15px] font-bold text-text-primary">{{ title }}</h3>
+      <p v-if="warning" data-testid="confirm-warning" role="alert" class="m-0 mb-3 rounded-[10px] border-2 border-fail p-3 text-[15px] font-bold text-fail">⚠ {{ warning }}</p>
       <p class="m-0 mb-4">{{ body }}</p>
       <div class="flex justify-end gap-2">
         <button ref="cancelBtn" type="button" data-testid="confirm-cancel" class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary" @click="emit('cancel')">Cancel</button>

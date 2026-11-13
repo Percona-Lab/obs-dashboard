@@ -72,8 +72,9 @@ export interface ReleaseState {
   sync_error: string
   sync: InstanceCard[]
   removals: { project: string; item: string }[]
+  // skipped: a user chose to release this head of the PR without QA; Release is then available whatever the state.
   // url: the QA run ('' while none). error: why QA could not run, set with state 'failure'.
-  qa: { state: 'waiting' | 'running' | 'finished' | 'failure'; lanes: Lane[]; url: string; error: string } | null
+  qa: { state: 'waiting' | 'running' | 'finished' | 'failure'; lanes: Lane[]; url: string; error: string; skipped?: boolean; skipped_by?: string } | null
   final: {
     tags: string[]
     instances: InstanceCard[]
@@ -116,4 +117,4 @@ export interface HistoryPage {
 }
 
 export type ReleaseAction =
-  | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'retry-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'
+  | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'retry-qa' | 'skip-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'
