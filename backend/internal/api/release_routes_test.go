@@ -63,6 +63,9 @@ func (s *stubRelease) ApproveQA(ctx context.Context, email, id, head string) err
 func (s *stubRelease) RetryQA(ctx context.Context, email, id, head string) error {
 	return s.rec("retry-qa", ctx)
 }
+func (s *stubRelease) RerunQA(ctx context.Context, email, id, head, lane string) error {
+	return s.rec("rerun-qa", ctx)
+}
 func (s *stubRelease) SkipQA(ctx context.Context, email, id, head string) error {
 	return s.rec("skip-qa", ctx)
 }
@@ -118,6 +121,7 @@ var releaseRoutes = []struct{ method, path, body string }{
 	{"POST", "/api/release/releases/r1/approve-changelog", `{"head":"h"}`},
 	{"POST", "/api/release/releases/r1/retry-qa", `{"head":"h"}`},
 	{"POST", "/api/release/releases/r1/skip-qa", `{"head":"h"}`},
+	{"POST", "/api/release/releases/r1/rerun-qa", `{"head":"h","lane":"x"}`},
 }
 
 func TestReleaseRoutesRequireUser(t *testing.T) {

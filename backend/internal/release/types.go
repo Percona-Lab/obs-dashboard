@@ -69,6 +69,8 @@ type Lane struct {
 	JenkinsURL string   `json:"jenkins_url"`
 	URL        string   `json:"url"`
 	State      RunState `json:"state"`
+
+	jobID int64 // the GitHub job of the lane, to run it again
 }
 
 type QA struct {
@@ -80,6 +82,8 @@ type QA struct {
 	// The release may then be made whatever State is.
 	Skipped   bool   `json:"skipped"`
 	SkippedBy string `json:"skipped_by"` // who skipped; "" unless Skipped
+
+	runID int64 // the QA run, to run its failed jobs again; 0 while none is known
 }
 
 type Final struct {

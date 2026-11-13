@@ -11,6 +11,10 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Once QA has finished, each failed lane in the QA step has a "Re-run" button, and the step has a "Re-run all failed" button. Both ask for confirmation, then run the lanes again on the same QA run; passed lanes keep their result.
+
 ## [0.2.8] - 2026-11-13
 
 ### Added

@@ -8,7 +8,7 @@ import ReleaseRemovals from './ReleaseRemovals.vue'
 import type { Lane, ReleaseState } from '../../types/release'
 
 const props = defineProps<{ release: ReleaseState }>()
-const { act, busy, pending } = useRelease()
+const { act, rerunQa, busy, pending } = useRelease()
 
 const qa = computed(() => props.release.qa)
 const lanes = computed(() => qa.value?.lanes ?? [])
@@ -74,6 +74,22 @@ const qaFailed = computed(() => qa.value?.state === 'failure')
 const withoutQa = computed(() => qa.value?.state !== 'finished')
 // Pins the release id and head the user saw when the dialog opened.
 const skipDialog = ref<{ id: string; head: string } | null>(null)
+// GitHub runs a job again only once the whole QA run has completed.
+const canRerun = computed(() => canAct.value && qa.value?.state === 'finished' && failed.value.length > 0)
+// Pins the release id, head and lanes the user saw when the dialog opened. lane is '' for every failed lane.
+const rerunDialog = ref<{ id: string; head: string; lane: string; names: string[] } | null>(null)
+const openRerun = (lane: string) => {
+  rerunDialog.value = { id: props.release.id, head: props.release.head_sha, lane, names: lane ? [lane] : failed.value.map((l) => l.name) }
+}
+// The lane whose re-run is in flight; '' for all of them, null for none.
+const rerunning = ref<string | null>(null)
+async function doRerun() {
+  const d = rerunDialog.value
+  rerunDialog.value = null
+  if (!d) return
+  rerunning.value = d.lane
+  try { await rerunQa(d.id, d.head, d.lane) } finally { rerunning.value = null }
+}
 async function doSkip() {
   const d = skipDialog.value
   skipDialog.value = null
@@ -120,6 +136,7 @@ async function doSkip() {
         <div v-for="l in g.failed" :key="l.name" data-testid="lane-failed" class="flex items-center gap-3 py-1 text-[13px]">
           <span class="text-fail">✗</span><span class="font-mono">{{ l.name }}</span>
           <a v-if="link(l).href" :href="link(l).href" target="_blank" rel="noopener noreferrer" class="ml-auto text-[12px] text-brand-purple">{{ link(l).text }}</a>
+          <button v-if="canRerun" type="button" data-testid="rerun-lane" :disabled="busy" :aria-label="`Re-run ${l.name}`" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-2 py-[2px] text-[12px] text-text-primary disabled:opacity-50" :class="link(l).href ? '' : 'ml-auto'" @click="openRerun(l.name)" :aria-busy="rerunning === l.name ? 'true' : undefined"><ReleaseSpinner v-if="rerunning === l.name" />Re-run</button>
         </div>
         <div v-for="l in g.other" :key="l.name" data-testid="lane-running" class="flex items-center gap-3 py-1 text-[13px] text-text-secondary">
           <ReleaseSpinner v-if="l.state === 'queued' || l.state === 'running'" /><span v-else class="text-warn">◐</span><span class="font-mono">{{ l.name }}</span>
@@ -137,7 +154,11 @@ async function doSkip() {
 
       <ReleaseRemovals :release="release" />
 
-      <p v-if="failed.length" class="m-0 text-[12px] text-text-muted">Fix the failures outside the dashboard, then use "Update to latest main &amp; restart" above, or release anyway after a confirmation.</p>
+      <div v-if="canRerun" class="flex items-center gap-3">
+        <button type="button" data-testid="rerun-all" :disabled="busy" class="inline-flex items-center gap-2 cursor-pointer rounded-md border border-border bg-transparent px-3 py-[6px] text-text-primary disabled:opacity-50" @click="openRerun('')" :aria-busy="rerunning === '' ? 'true' : undefined"><ReleaseSpinner v-if="rerunning === ''" />Re-run all failed</button>
+        <small class="text-text-muted">Runs the failed lanes again on the same QA run. Passed lanes keep their result.</small>
+      </div>
+      <p v-if="failed.length" class="m-0 text-[12px] text-text-muted">Re-run a failed lane, or fix the failures outside the dashboard and use "Update to latest main &amp; restart" above, or release anyway after a confirmation.</p>
     </template>
 
     <template v-if="qa && (qa.state !== 'waiting' || skipped)">
@@ -154,6 +175,7 @@ async function doSkip() {
     </div>
 
     <ReleaseConfirm v-if="dialog" :title="withoutQa ? 'Release without QA?' : hasBad ? 'Release with failed lanes?' : 'Release now?'" :body="releaseBody" :confirm-label="withoutQa ? 'Release without QA' : hasBad ? 'Release anyway' : 'Release'" :danger="hasBad || withoutQa" @confirm="doRelease" @cancel="dialog = null" />
+    <ReleaseConfirm v-if="rerunDialog" :title="rerunDialog.lane ? 'Re-run this QA lane?' : 'Re-run all failed QA lanes?'" :body="`This runs ${rerunDialog.names.join(', ')} again on the same QA run. Release is not available until QA has finished again.`" confirm-label="Re-run" @confirm="doRerun" @cancel="rerunDialog = null" />
     <ReleaseConfirm v-if="skipDialog" title="Skip QA?" warning="The packages of this version of the release PR will not be tested." body="Skip QA only when it already passed on an earlier iteration of this release PR. After this, Release is available without QA, and a comment on the PR says that QA was skipped. Updating to latest main asks for QA again." confirm-label="Skip QA" danger @confirm="doSkip" @cancel="skipDialog = null" />
   </div>
 </template>

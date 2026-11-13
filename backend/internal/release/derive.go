@@ -288,7 +288,7 @@ func QALanes(f Facts, units []UnitState, hasQALabel bool) QA {
 	if run == nil {
 		return qa
 	}
-	qa.URL = run.HTMLURL
+	qa.URL, qa.runID = run.HTMLURL, run.ID
 	cdnFailed := false
 	for _, j := range f.Jobs[run.ID] {
 		if isCDN(j) && jobState(j) == StateFailure {
@@ -297,7 +297,7 @@ func QALanes(f Facts, units []UnitState, hasQALabel bool) QA {
 		if !isLane(j) {
 			continue
 		}
-		l := Lane{Name: strings.TrimPrefix(j.Name, JobLanePrefix), URL: j.HTMLURL, State: jobState(j)}
+		l := Lane{Name: strings.TrimPrefix(j.Name, JobLanePrefix), URL: j.HTMLURL, State: jobState(j), jobID: j.ID}
 		for _, a := range f.Annotations[j.ID] {
 			if a.Title != AnnotationJenkins {
 				continue

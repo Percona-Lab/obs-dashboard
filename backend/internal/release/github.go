@@ -96,6 +96,10 @@ type GitHub interface {
 	AmendFile(ctx context.Context, branch, expectHead, path string, content []byte) (string, error)
 	Dispatch(ctx context.Context, workflow string, inputs map[string]string) error
 	ApproveRun(ctx context.Context, runID int64) error
+	// RerunJob runs one job of a completed run again, on the same run.
+	RerunJob(ctx context.Context, jobID int64) error
+	// RerunFailedJobs runs every failed job of a completed run again.
+	RerunFailedJobs(ctx context.Context, runID int64) error
 	WorkflowRuns(ctx context.Context, workflow string, limit int) ([]Run, error)
 	RunsForSHA(ctx context.Context, sha string) ([]Run, error)
 	Jobs(ctx context.Context, runID int64) ([]Job, error)
@@ -661,6 +665,19 @@ func (c *Client) Dispatch(ctx context.Context, workflow string, inputs map[strin
 // action_required), as "Approve workflows to run" on the pull request does.
 func (c *Client) ApproveRun(ctx context.Context, runID int64) error {
 	_, _, err := c.do(ctx, http.MethodPost, c.repoPath("actions/runs/"+strconv.FormatInt(runID, 10)+"/approve"), nil, false)
+	return err
+}
+
+// RerunJob runs one job again. GitHub accepts it only once the whole run has
+// completed; the run keeps its id and gets a new attempt.
+func (c *Client) RerunJob(ctx context.Context, jobID int64) error {
+	_, _, err := c.do(ctx, http.MethodPost, c.repoPath("actions/jobs/"+strconv.FormatInt(jobID, 10)+"/rerun"), nil, false)
+	return err
+}
+
+// RerunFailedJobs runs every failed job of a completed run again.
+func (c *Client) RerunFailedJobs(ctx context.Context, runID int64) error {
+	_, _, err := c.do(ctx, http.MethodPost, c.repoPath("actions/runs/"+strconv.FormatInt(runID, 10)+"/rerun-failed-jobs"), nil, false)
 	return err
 }
 
