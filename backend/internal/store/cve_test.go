@@ -472,3 +472,136 @@ func TestQueryVulnerableScans(t *testing.T) {
 		}
 	})
 }
+
+func TestQueryImageScans(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	at := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	vuln := model.CveScan{
+		Repo: "images", Arch: "x86_64", ImageRef: "r/v:1", ScannedAt: at, HighCount: 1,
+		Findings: []model.CveFinding{{ID: "CVE-2026-0001", PkgName: "openssl", Severity: "HIGH"}},
+	}
+	clean := model.CveScan{Repo: "images", Arch: "x86_64", ImageRef: "r/c:1", ScannedAt: at}
+	seed := []struct {
+		project, pkg string
+		scan         model.CveScan
+	}{
+		{"ppg:staging:18:containers", "vuln", vuln},
+		{"ppg:staging:18:containers", "clean", clean},
+		{"ppg:staging2:x", "lookalike", vuln},
+		{"ppg:releases:18:containers", "rel", vuln},
+	}
+	for _, s := range seed {
+		if err := store.UpsertCveScan(db, s.project, s.pkg, s.scan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := func(scans []model.ImageCveScan) []string {
+		var out []string
+		for _, s := range scans {
+			out = append(out, s.Project+"/"+s.Package+"/"+s.Arch)
+		}
+		return out
+	}
+	check := func(prefix string, want []string) {
+		t.Helper()
+		scans, err := store.QueryImageScans(db, prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := keys(scans)
+		if len(got) != len(want) {
+			t.Fatalf("prefix %q: got %v, want %v", prefix, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("prefix %q: got %v, want %v", prefix, got, want)
+			}
+		}
+	}
+	check("ppg:staging", []string{
+		"ppg:staging:18:containers/clean/x86_64",
+		"ppg:staging:18:containers/vuln/x86_64",
+	})
+	check("", []string{
+		"ppg:releases:18:containers/rel/x86_64",
+		"ppg:staging2:x/lookalike/x86_64",
+		"ppg:staging:18:containers/clean/x86_64",
+		"ppg:staging:18:containers/vuln/x86_64",
+	})
+}
+
+func TestQueryUnclassifiedImages(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	at := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	scan := func(findings ...model.CveFinding) model.CveScan {
+		return model.CveScan{
+			Repo: "images", Arch: "x86_64", ImageRef: "r", ScannedAt: at,
+			HighCount: len(findings), Findings: findings,
+		}
+	}
+	plain := model.CveFinding{ID: "CVE-1", PkgName: "a", Severity: "HIGH"}
+	classified := model.CveFinding{ID: "CVE-2", PkgName: "b", Severity: "HIGH", Class: "os-pkgs"}
+	seed := []struct {
+		pkg  string
+		scan model.CveScan
+	}{
+		{"A", scan(plain)},
+		{"B", scan(classified)},
+		{"C", scan(classified, plain)},
+		{"D", scan()},
+	}
+	for _, s := range seed {
+		if err := store.UpsertCveScan(db, "p", s.pkg, s.scan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.QueryUnclassifiedImages(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []store.VulnerableImage{{"p", "A", "images"}, {"p", "C", "images"}}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestQueryContainerVersions(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	yes, no := true, false
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, p := range []*model.Package{
+		{Project: "ppg:staging:18:containers", Name: "pg18", IsContainer: &yes, Version: "18.4-1-2.34", RollupState: model.RollupPublished, UpdatedAt: now},
+		{Project: "ppg:staging:18", Name: "rpm", IsContainer: &no, Version: "1.0", RollupState: model.RollupPublished, UpdatedAt: now},
+	} {
+		if err := store.UpsertPackageState(db, p, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.QueryContainerVersions(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got["ppg:staging:18:containers/pg18"] != "18.4-1-2.34" {
+		t.Fatalf("got %v", got)
+	}
+}
