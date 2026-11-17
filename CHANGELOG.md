@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-11-17
+
 ### Added
 
 - A "CVEs" tab after Artifacts has three views. "Staging" lists the packages to bump to clear the HIGH and CRITICAL CVEs found in the staging images, split into "Ours to bump", "Base OS" and "Not classified yet". Entries that are new since you last looked are marked, and "Mark all as seen" clears the markers; the markers are kept in your browser, and the tab shows a badge when there are new entries. "Released" shows, for each released image, how many of its CVEs the current staging image already fixes. "By image" is the CVE table that used to be on Overview.
