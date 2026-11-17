@@ -3,9 +3,11 @@ import type { MainTab } from '../composables/useUrlState'
 import { useAuth, login, logout } from '../composables/useAuth'
 import { useUpgrades } from '../composables/useUpgrades'
 import { useRelease } from '../composables/useRelease'
+import { useCveReport } from '../composables/useCveReport'
 
 const { updateAvailable } = useUpgrades()
 const { enabled: releaseEnabled } = useRelease()
+const { newCount } = useCveReport()
 
 defineProps<{
   theme: 'light' | 'dark'
@@ -52,6 +54,15 @@ async function onSignOut() {
         @click="emit('update:main-tab', 'artifacts')"
       >
         Artifacts
+      </button>
+      <button
+        data-testid="cves-tab"
+        class="tab-pill"
+        :class="{ active: mainTab === 'cves' }"
+        @click="emit('update:main-tab', 'cves')"
+      >
+        CVEs
+        <span v-if="newCount > 0" data-testid="cves-new-badge" class="ml-[6px] inline-block px-[6px] py-[1px] rounded-full bg-warn-tint text-warn text-[10.5px] font-bold leading-[1.4] align-middle">{{ newCount }} new</span>
       </button>
       <button
         v-if="signedIn && releaseEnabled"

@@ -6,11 +6,14 @@ import HealthHeader from './components/HealthHeader.vue'
 import MainGrid from './components/MainGrid.vue'
 import ArtifactsPanel from './components/ArtifactsPanel.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
+import CvePanel from './components/cve/CvePanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ReleasePanel from './components/release/ReleasePanel.vue'
 import HostUpdateBanner from './components/HostUpdateBanner.vue'
 import type { Context } from './types/api'
 import type { WindowKey } from './types/overview'
+import type { CveView } from './types/cveReport'
+import { useCveReport } from './composables/useCveReport'
 import { PPG_DEVEL_CONTEXT, PPG_STAGING_CONTEXT, RELEASES_CONTEXT, prArtifactsContexts } from './lib/contexts'
 import { usePackages } from './composables/usePackages'
 import { useEvents } from './composables/useEvents'
@@ -177,6 +180,10 @@ const artifactsContext = ref<Context>(PPG_STAGING_CONTEXT)
 // Overview panel state (lifted for URL sync)
 const overviewWindow = ref<WindowKey>('24h')
 
+// CVEs panel state (lifted for URL sync)
+const cveView = ref<CveView>('staging')
+useCveReport().start()
+
 // Artifacts contexts: PPG devel/staging + Releases + one context per (PR, tier).
 const artifactsContexts = computed<Context[]>(() => [
   PPG_DEVEL_CONTEXT,
@@ -197,6 +204,7 @@ useUrlState({
   artifactsContexts,
   overviewWindow,
   activeInstances,
+  cveView,
 })
 
 const filteredPackages = computed(() => filterByTags(activeTags.value, activeInstances.value))
@@ -310,6 +318,7 @@ watch(selectedContext, () => refresh())
         :overview-window="overviewWindow"
         @update:overview-window="overviewWindow = $event"
       />
+      <CvePanel v-else-if="mainTab === 'cves'" :view="cveView" @update:view="cveView = $event" />
       <ReleasePanel v-else-if="mainTab === 'release' && signedIn" @open-builds="mainTab = 'board'" />
       <SettingsPanel v-else-if="mainTab === 'settings' && signedIn" />
     </div>

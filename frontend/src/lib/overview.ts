@@ -6,6 +6,14 @@ import { isPRProject } from './project'
 
 export const PROJECT_ACCENTS = ['#6E3FF3', '#2A78D4', '#1F9D55', '#E08A00', '#B0203A']
 
+// Accent for a project by its position in the NAME-sorted project list (not
+// snapshot ordering, which is rebuild-sorted and would shuffle colours between
+// windows/refetches).
+export function projectAccent(sortedProjects: string[], project: string): string {
+  const idx = sortedProjects.indexOf(project)
+  return PROJECT_ACCENTS[Math.max(0, idx) % PROJECT_ACCENTS.length]
+}
+
 export function ageColor(days: number): string {
   if (days >= 45) return 'var(--crit)'
   if (days >= 21) return 'var(--high)'
