@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { CveView } from '../../types/cveReport'
+import type { CveStaging, CveView } from '../../types/cveReport'
 import { useCveReport } from '../../composables/useCveReport'
 import { useOverviewData } from '../../composables/useOverviewData'
 import { projectAccent } from '../../lib/overview'
 import type { WindowKey } from '../../types/overview'
 import CveExposureTable from '../CveExposureTable.vue'
+import CveStagingView from './CveStagingView.vue'
 
 const props = defineProps<{ view: CveView }>()
 const emit = defineEmits<{ 'update:view': [v: CveView] }>()
@@ -63,7 +64,7 @@ defineExpose({ focusRowKey })
       <div v-else-if="!report && loading" class="flex flex-col gap-2 bg-bg-card border border-border rounded-[14px] p-[15px_20px]">
         <div v-for="i in 5" :key="i" class="h-[38px] bg-bg-muted rounded-[8px] animate-pulse" />
       </div>
-      <div v-else-if="props.view === 'staging'" data-testid="cve-staging-placeholder" />
+      <CveStagingView v-else-if="props.view === 'staging' && report" :staging="report.staging as CveStaging" :focus-row-key="focusRowKey" />
       <div v-else data-testid="cve-released-placeholder" />
     </template>
   </div>
