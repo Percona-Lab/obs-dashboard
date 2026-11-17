@@ -92,6 +92,9 @@ func TestRescanVulnerableSkipsPendingUntilScanned(t *testing.T) {
 	release := make(chan struct{})
 	scanned := make(chan struct{}, 1)
 	s := cve.NewScanner(db, hub.New(), 1, cve.WithExecFn(func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "grype" {
+			return []byte(grypeEmptyJSON), nil
+		}
 		<-release
 		select {
 		case scanned <- struct{}{}:

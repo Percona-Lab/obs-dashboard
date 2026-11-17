@@ -1,8 +1,11 @@
 package cve
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/percona/obs-dashboard/internal/model"
@@ -48,7 +51,16 @@ func parseGrypeOutput(data []byte, rpms []rpmInfo) ([]model.CveFinding, error) {
 	var findings []model.CveFinding
 	for _, m := range out.Matches {
 		sev := strings.ToUpper(m.Vulnerability.Severity)
-		if (sev != "HIGH" && sev != "CRITICAL") || len(m.Vulnerability.Fix.Versions) == 0 {
+		if sev != "HIGH" && sev != "CRITICAL" {
+			continue
+		}
+		var fixed []string
+		for _, v := range m.Vulnerability.Fix.Versions {
+			if v = strings.TrimPrefix(v, "0:"); v != "" {
+				fixed = append(fixed, v)
+			}
+		}
+		if len(fixed) == 0 {
 			continue
 		}
 		id := m.Vulnerability.ID
@@ -59,10 +71,6 @@ func parseGrypeOutput(data []byte, rpms []rpmInfo) ([]model.CveFinding, error) {
 					break
 				}
 			}
-		}
-		fixed := make([]string, len(m.Vulnerability.Fix.Versions))
-		for i, v := range m.Vulnerability.Fix.Versions {
-			fixed[i] = strings.TrimPrefix(v, "0:")
 		}
 		a := m.Artifact
 		f := model.CveFinding{
@@ -112,4 +120,49 @@ func parseGrypeOutput(data []byte, rpms []rpmInfo) ([]model.CveFinding, error) {
 		findings = append(findings, f)
 	}
 	return findings, nil
+}
+
+// mergeFindings returns trivy's findings followed by the grype findings trivy
+// lacks. Key: (ID, PkgName, Path). On a duplicate the trivy finding is kept and
+// "grype" is appended to its Scanners.
+func mergeFindings(trivy, grype []model.CveFinding) []model.CveFinding {
+	type key struct{ id, pkg, path string }
+	merged := append([]model.CveFinding(nil), trivy...)
+	idx := make(map[key]int, len(merged))
+	for i, f := range merged {
+		idx[key{f.ID, f.PkgName, f.Path}] = i
+	}
+	for _, f := range grype {
+		k := key{f.ID, f.PkgName, f.Path}
+		if i, ok := idx[k]; ok {
+			merged[i].Scanners = append(append([]string(nil), merged[i].Scanners...), "grype")
+			continue
+		}
+		idx[k] = len(merged)
+		merged = append(merged, f)
+	}
+	return merged
+}
+
+// runGrype scans imageRef and returns its findings, enriched from rpms.
+func (s *Scanner) runGrype(ctx context.Context, imageRef, platform string, rpms []rpmInfo) ([]model.CveFinding, error) {
+	s.trivyMu.Lock()
+	out, err := s.execFn(ctx, "grype",
+		"registry:"+imageRef,
+		"--platform", "linux/"+platform,
+		"--only-fixed",
+		"--by-cve",
+		"-o", "json",
+		"-q",
+	)
+	s.trivyMu.Unlock()
+	if err != nil {
+		stderr := ""
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			stderr = ": " + strings.TrimSpace(string(exitErr.Stderr))
+		}
+		return nil, fmt.Errorf("grype: %w%s", err, stderr)
+	}
+	return parseGrypeOutput(out, rpms)
 }

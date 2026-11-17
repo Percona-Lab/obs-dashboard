@@ -40,3 +40,52 @@ func TestParseGrypeOutputInvalidJSON(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestParseGrypeOutputTypeMapping(t *testing.T) {
+	data := []byte(`{"matches":[
+{"vulnerability":{"id":"CVE-2026-0200","severity":"High","fix":{"versions":["2.0"]}},"artifact":{"name":"requests","version":"1.0","type":"python","locations":[{"path":"/opt/app/requests-1.0.dist-info/METADATA"}]}},
+{"vulnerability":{"id":"CVE-2026-0201","severity":"Critical","fix":{"versions":["4.17.21"]}},"artifact":{"name":"lodash","version":"4.0.0","type":"npm","locations":[{"path":"/app/node_modules/lodash/package.json"}]}}
+]}`)
+	got, err := parseGrypeOutput(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := []string{"grype"}
+	want := []model.CveFinding{
+		{ID: "CVE-2026-0200", PkgName: "requests", InstalledVersion: "1.0", FixedVersion: "2.0", Severity: "HIGH", Class: "lang-pkgs", Type: "python-pkg", Path: "opt/app/requests-1.0.dist-info/METADATA", Scanners: g},
+		{ID: "CVE-2026-0201", PkgName: "lodash", InstalledVersion: "4.0.0", FixedVersion: "4.17.21", Severity: "CRITICAL", Class: "lang-pkgs", Type: "npm", Path: "app/node_modules/lodash/package.json", Scanners: g},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestMergeFindings(t *testing.T) {
+	trivy := []model.CveFinding{
+		{ID: "CVE-1", PkgName: "a", Title: "t", Scanners: []string{"trivy"}},
+		{ID: "CVE-2", PkgName: "x/net", Path: "usr/bin/one", Scanners: []string{"trivy"}},
+	}
+	grype := []model.CveFinding{
+		{ID: "CVE-1", PkgName: "a", Scanners: []string{"grype"}},
+		{ID: "CVE-2", PkgName: "x/net", Path: "usr/bin/two", Scanners: []string{"grype"}},
+		{ID: "CVE-1", PkgName: "b", Scanners: []string{"grype"}},
+	}
+	got := mergeFindings(trivy, grype)
+	if len(got) != 4 {
+		t.Fatalf("len = %d, want 4", len(got))
+	}
+	if got[0].ID != "CVE-1" || got[0].PkgName != "a" || got[0].Title != "t" || !reflect.DeepEqual(got[0].Scanners, []string{"trivy", "grype"}) {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if !reflect.DeepEqual(got[1].Scanners, []string{"trivy"}) {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+	for _, f := range got[2:] {
+		if !reflect.DeepEqual(f.Scanners, []string{"grype"}) {
+			t.Errorf("grype-only finding = %+v", f)
+		}
+	}
+	if got[2].Path != "usr/bin/two" || got[3].PkgName != "b" {
+		t.Errorf("order: %+v %+v", got[2], got[3])
+	}
+}
