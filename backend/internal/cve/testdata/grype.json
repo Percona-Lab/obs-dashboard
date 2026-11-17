@@ -18,6 +18,9 @@
     {"vulnerability": {"id": "CVE-2026-0103", "severity": "High", "fix": {"versions": [], "state": "fixed"}},
      "relatedVulnerabilities": [],
      "artifact": {"name": "zlib", "version": "1.2-1", "type": "rpm", "locations": [], "upstreams": []}},
+    {"vulnerability": {"id": "CVE-2026-0105", "severity": "High", "fix": {"versions": [""], "state": "fixed"}},
+     "relatedVulnerabilities": [],
+     "artifact": {"name": "zlib", "version": "1.2-1", "type": "rpm", "locations": [], "upstreams": []}},
     {"vulnerability": {"id": "GHSA-aaaa-bbbb-cccc", "severity": "High", "fix": {"versions": ["0.55.0"], "state": "fixed"}},
      "relatedVulnerabilities": [{"id": "GHSA-aaaa-bbbb-cccc"}, {"id": "CVE-2026-0005"}],
      "artifact": {"name": "golang.org/x/net", "version": "v0.54.0", "type": "go-module", "locations": [{"path": "/usr/sbin/gosu"}], "upstreams": []}}

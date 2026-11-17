@@ -297,25 +297,26 @@ func (s *Scanner) scanPackage(ctx context.Context, req ScanRequest) {
 		})
 
 		slog.Info("cve: scanning", "pkg", req.Package, "arch", target.Arch, "image", imageRef)
-		scan, err := s.runTrivy(ctx, imageRef, platform, target.Repo, target.Arch)
+		scan, rpms, err := s.runTrivy(ctx, imageRef, platform, target.Repo, target.Arch)
 		if err != nil {
 			slog.Warn("cve: trivy failed", "pkg", req.Package, "arch", target.Arch, "err", err)
-			s.appendEvent(&model.Event{
-				ID:       "evt_" + ulid.Make().String(),
-				Type:     model.EventCVEScanFailed,
-				Tags:     req.Tags,
-				Project:  req.Project,
-				Package:  req.Package,
-				Repo:     target.Repo,
-				Arch:     target.Arch,
-				What:     "CVE scan failed",
-				Why:      err.Error(),
-				Version:  req.PrimaryTag,
-				URL:      obsURL,
-				At:       time.Now().UTC(),
-				Instance: target.Instance,
-			})
+			s.appendScanFailed(req, target, obsURL, err)
 			continue
+		}
+		grypeFindings, err := s.runGrype(ctx, imageRef, platform, rpms)
+		if err != nil {
+			slog.Warn("cve: grype failed", "pkg", req.Package, "arch", target.Arch, "err", err)
+			s.appendScanFailed(req, target, obsURL, err)
+			continue
+		}
+		scan.Findings = mergeFindings(scan.Findings, grypeFindings)
+		for _, f := range scan.Findings {
+			switch f.Severity {
+			case "CRITICAL":
+				scan.CriticalCount++
+			case "HIGH":
+				scan.HighCount++
+			}
 		}
 
 		if err := store.UpsertCveScan(s.db, req.Project, req.Package, scan); err != nil {
@@ -353,7 +354,26 @@ func (s *Scanner) scanPackage(ctx context.Context, req ScanRequest) {
 	s.hub.Notify(hubpkg.PackageUpdate(pkg))
 }
 
-func (s *Scanner) runTrivy(ctx context.Context, imageRef, platform, repo, arch string) (model.CveScan, error) {
+// appendScanFailed records a CVEScanFailed event for target.
+func (s *Scanner) appendScanFailed(req ScanRequest, target model.Target, obsURL string, err error) {
+	s.appendEvent(&model.Event{
+		ID:       "evt_" + ulid.Make().String(),
+		Type:     model.EventCVEScanFailed,
+		Tags:     req.Tags,
+		Project:  req.Project,
+		Package:  req.Package,
+		Repo:     target.Repo,
+		Arch:     target.Arch,
+		What:     "CVE scan failed",
+		Why:      err.Error(),
+		Version:  req.PrimaryTag,
+		URL:      obsURL,
+		At:       time.Now().UTC(),
+		Instance: target.Instance,
+	})
+}
+
+func (s *Scanner) runTrivy(ctx context.Context, imageRef, platform, repo, arch string) (model.CveScan, []rpmInfo, error) {
 	s.trivyMu.Lock()
 	out, err := s.execFn(ctx, "trivy",
 		"image",
@@ -378,7 +398,7 @@ func (s *Scanner) runTrivy(ctx context.Context, imageRef, platform, repo, arch s
 		if exitErr != nil && len(exitErr.Stderr) > 0 {
 			stderr = ": " + strings.TrimSpace(string(exitErr.Stderr))
 		}
-		return model.CveScan{}, fmt.Errorf("trivy: %w%s", err, stderr)
+		return model.CveScan{}, nil, fmt.Errorf("trivy: %w%s", err, stderr)
 	}
 	return parseTrivyOutput(out, imageRef, repo, arch)
 }
@@ -409,10 +429,10 @@ type trivyOutput struct {
 	} `json:"Results"`
 }
 
-func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, error) {
+func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, []rpmInfo, error) {
 	var raw trivyOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return model.CveScan{}, fmt.Errorf("parse trivy JSON: %w", err)
+		return model.CveScan{}, nil, fmt.Errorf("parse trivy JSON: %w", err)
 	}
 	scan := model.CveScan{
 		Repo:      repo,
@@ -448,6 +468,7 @@ func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, 
 				Title:            v.Title,
 				Class:            result.Class,
 				Type:             result.Type,
+				Scanners:         []string{"trivy"},
 			}
 			switch {
 			case result.Class == "os-pkgs":
@@ -475,15 +496,9 @@ func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, 
 				}
 			}
 			scan.Findings = append(scan.Findings, f)
-			switch v.Severity {
-			case "CRITICAL":
-				scan.CriticalCount++
-			case "HIGH":
-				scan.HighCount++
-			}
 		}
 	}
-	return scan, nil
+	return scan, rpms, nil
 }
 
 func (s *Scanner) appendEvent(evt *model.Event) {
