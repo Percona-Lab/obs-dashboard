@@ -12,7 +12,7 @@ import (
 )
 
 type grypeOutput struct {
-	Matches []grypeMatch `json:"matches"`
+	Matches *[]grypeMatch `json:"matches"`
 }
 
 type grypeMatch struct {
@@ -46,14 +46,18 @@ func parseGrypeOutput(data []byte, rpms []rpmInfo) ([]model.CveFinding, error) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("parse grype JSON: %w", err)
 	}
+	if out.Matches == nil {
+		return nil, errors.New("parse grype JSON: no matches field")
+	}
 	type key struct{ id, pkg, path string }
 	seen := map[key]bool{}
 	var findings []model.CveFinding
-	for _, m := range out.Matches {
+	for _, m := range *out.Matches {
 		sev := strings.ToUpper(m.Vulnerability.Severity)
 		if sev != "HIGH" && sev != "CRITICAL" {
 			continue
 		}
+		// A leading "0:" epoch is stripped so versions read like Trivy's; entries left empty are dropped.
 		var fixed []string
 		for _, v := range m.Vulnerability.Fix.Versions {
 			if v = strings.TrimPrefix(v, "0:"); v != "" {
@@ -81,6 +85,7 @@ func parseGrypeOutput(data []byte, rpms []rpmInfo) ([]model.CveFinding, error) {
 			Severity:         sev,
 			Scanners:         []string{"grype"},
 		}
+		// Only rpm, go-module and python map to Trivy's types; other ecosystems may not merge with Trivy's findings because the two tools name packages differently.
 		switch a.Type {
 		case "rpm":
 			f.Class, f.Type = "os-pkgs", "redhat"

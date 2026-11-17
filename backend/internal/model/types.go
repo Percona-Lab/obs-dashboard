@@ -67,7 +67,7 @@ type CveFinding struct {
 	Type             string   `json:"pkg_type,omitempty"` // "redhat", "gobinary", "python-pkg", … (trivy's result Type; mapped for grype)
 	Path             string   `json:"path,omitempty"`     // binary (gobinary) or package file (other lang-pkgs); empty for RPMs
 	Src              string   `json:"src,omitempty"`      // RPM source package name
-	Vendor           string   `json:"vendor,omitempty"`   // RPM vendor (trivy "Maintainer"; grype's equivalent for grype)
+	Vendor           string   `json:"vendor,omitempty"`   // RPM vendor (trivy "Maintainer"; for grype findings copied from trivy's package list, empty if the RPM is not listed)
 	Owner            string   `json:"owner,omitempty"`    // source package of the RPM that ships Path, when resolved
 	Scanners         []string `json:"scanners,omitempty"` // "trivy", "grype" or both
 }
