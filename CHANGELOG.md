@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-11-17
+
 ### Added
 
 - `GET /api/cve/findings` lists every image scan that currently has HIGH or CRITICAL CVEs, across all images, with the findings. An optional `?project=` prefix such as `ppg:staging` keeps that project and its subprojects.
