@@ -151,11 +151,24 @@ func AttachCveScans(db *sql.DB, packages []*model.Package) error {
 // subprojects: "ppg:staging" matches "ppg:staging" and "ppg:staging:18", not
 // "ppg:staging2". The prefix is compared literally, not as a LIKE pattern.
 func QueryVulnerableScans(db *sql.DB, projectPrefix string) ([]model.ImageCveScan, error) {
+	return queryScans(db, projectPrefix, true)
+}
+
+// QueryImageScans returns every per-arch scan under projectPrefix, clean
+// scans included. Prefix semantics and ordering as QueryVulnerableScans.
+func QueryImageScans(db *sql.DB, projectPrefix string) ([]model.ImageCveScan, error) {
+	return queryScans(db, projectPrefix, false)
+}
+
+func queryScans(db *sql.DB, projectPrefix string, vulnerableOnly bool) ([]model.ImageCveScan, error) {
+	cond := ""
+	if vulnerableOnly {
+		cond = "critical_count + high_count > 0 AND "
+	}
 	rows, err := db.Query(`
 		SELECT project, package, repo, arch, image_ref, scanned_at, critical_count, high_count, findings_json, cve_since, clean_since
 		FROM cve_scans
-		WHERE critical_count + high_count > 0
-		  AND (?1 = '' OR project = ?1 OR substr(project, 1, length(?1) + 1) = ?1 || ':')
+		WHERE `+cond+`(?1 = '' OR project = ?1 OR substr(project, 1, length(?1) + 1) = ?1 || ':')
 		ORDER BY project, package, repo, arch`,
 		projectPrefix,
 	)
@@ -164,6 +177,49 @@ func QueryVulnerableScans(db *sql.DB, projectPrefix string) ([]model.ImageCveSca
 	}
 	defer rows.Close()
 	return scanImageCveRows(rows)
+}
+
+// QueryUnclassifiedImages lists images with at least one stored finding that
+// has no "class" (scanned before classification existed).
+func QueryUnclassifiedImages(db *sql.DB) ([]VulnerableImage, error) {
+	rows, err := db.Query(`
+		SELECT DISTINCT s.project, s.package, s.repo
+		FROM cve_scans s, json_each(s.findings_json) f
+		WHERE json_type(s.findings_json) = 'array'
+		  AND json_extract(f.value, '$.class') IS NULL
+		ORDER BY s.project, s.package, s.repo`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VulnerableImage
+	for rows.Next() {
+		var v VulnerableImage
+		if err := rows.Scan(&v.Project, &v.Package, &v.Repo); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// QueryContainerVersions maps "<project>/<name>" to the package version for
+// every container package.
+func QueryContainerVersions(db *sql.DB) (map[string]string, error) {
+	rows, err := db.Query(`SELECT project, name, version FROM packages WHERE is_container = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var project, name, version string
+		if err := rows.Scan(&project, &name, &version); err != nil {
+			return nil, err
+		}
+		out[project+"/"+name] = version
+	}
+	return out, rows.Err()
 }
 
 // QueryCvePeriods returns completed CVE episodes for a package, newest first.
