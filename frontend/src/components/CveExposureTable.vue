@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive, ref, onUnmounted } from 'vue'
+import { computed, reactive } from 'vue'
 import type { OverviewProject } from '../types/overview'
 import type { CveScan } from '../types/api'
 import { oldestOpenLabel, oldestOpenColor, groupByCategory, formatFixHours } from '../lib/overview'
 import { latestScanTime } from '../lib/cve'
 import CveFindingsTable from './CveFindingsTable.vue'
-import { useAuth, handleUnauthorized } from '../composables/useAuth'
-import { errorText } from '../composables/http'
+import { useAuth } from '../composables/useAuth'
+import { useCveRescan } from '../composables/useCveRescan'
 
 const props = defineProps<{
   projects: OverviewProject[]
@@ -146,42 +146,7 @@ function reportScans(key: string): CveScan[] | null {
 // Results arrive through the scan events on the global stream, which already
 // trigger an overview refetch, so the table updates as scans finish.
 const { signedIn } = useAuth()
-const RESCAN_COOLDOWN_MS = 10_000
-const rescanBusy = ref(false)
-const rescanMsg = ref<string | null>(null)
-const rescanFailed = ref(false)
-let rescanTimer: ReturnType<typeof setTimeout> | null = null
-onUnmounted(() => { if (rescanTimer) clearTimeout(rescanTimer) })
-
-async function rescan() {
-  if (rescanBusy.value) return
-  rescanBusy.value = true
-  rescanFailed.value = false
-  rescanMsg.value = null
-  let cooldown = false
-  try {
-    const res = await fetch('/api/cve/rescan', { method: 'POST' })
-    if (res.status === 401) {
-      handleUnauthorized()
-      return
-    }
-    if (!res.ok) throw new Error(await errorText(res))
-    const { queued } = await res.json() as { queued: number }
-    rescanMsg.value = queued > 0
-      ? `Queued ${queued} image${queued === 1 ? '' : 's'}`
-      : 'Nothing queued: rescans already pending'
-    cooldown = true
-  } catch (e) {
-    rescanFailed.value = true
-    rescanMsg.value = `Rescan failed: ${e instanceof Error ? e.message : 'network error'}`
-  } finally {
-    if (cooldown) {
-      rescanTimer = setTimeout(() => { rescanBusy.value = false; rescanMsg.value = null }, RESCAN_COOLDOWN_MS)
-    } else {
-      rescanBusy.value = false
-    }
-  }
-}
+const { rescanBusy, rescanMsg, rescanFailed, rescan } = useCveRescan()
 </script>
 
 <template>
