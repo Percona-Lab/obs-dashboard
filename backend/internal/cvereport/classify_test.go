@@ -26,6 +26,7 @@ func TestClassify(t *testing.T) {
 		{"go library unowned", model.CveFinding{Class: "lang-pkgs", Type: "gobinary", PkgName: "golang.org/x/net", Path: "usr/local/bin/mystery"}, ListOurs, "usr/local/bin/mystery", KindBundled},
 		{"python owned", model.CveFinding{Class: "lang-pkgs", Type: "python-pkg", PkgName: "dnspython", Path: "usr/lib/python3.12/site-packages/dnspython-2.0.dist-info/METADATA", Owner: "python3.12-dns"}, ListOurs, "python3.12-dns", KindBundled},
 		{"python unowned", model.CveFinding{Class: "lang-pkgs", Type: "python-pkg", PkgName: "requests", Path: "opt/app/requests-2.0.0.dist-info/METADATA"}, ListOurs, "requests (opt/app/requests-2.0.0.dist-info/METADATA)", KindBundled},
+		{"python unowned no path", model.CveFinding{Class: "lang-pkgs", Type: "python-pkg", PkgName: "requests"}, ListOurs, "requests", KindBundled},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -40,5 +41,13 @@ func TestClassify(t *testing.T) {
 func TestRowKey(t *testing.T) {
 	if got := RowKey(ListOurs, "etcd"); got != "ours|etcd" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestOursVendor(t *testing.T) {
+	for v, want := range map[string]bool{"Percona, LLC": true, "obs://x/y": true, "Red Hat, Inc.": false, "": false} {
+		if got := OursVendor(v); got != want {
+			t.Errorf("OursVendor(%q) = %v", v, got)
+		}
 	}
 }

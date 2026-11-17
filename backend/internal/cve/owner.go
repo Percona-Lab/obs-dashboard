@@ -4,15 +4,12 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/percona/obs-dashboard/internal/cvereport"
 )
 
 // rpmInfo is one RPM from trivy's package list.
 type rpmInfo struct{ Name, Version, Src, Vendor string }
-
-// oursVendor reports whether an RPM vendor is the team's.
-func oursVendor(vendor string) bool {
-	return strings.HasPrefix(vendor, "Percona") || strings.HasPrefix(vendor, "obs://")
-}
 
 var pythonPrefix = regexp.MustCompile(`python(\d+(\.\d+)?)?`)
 
@@ -42,7 +39,7 @@ func goBinaryOwner(p string, rpms []rpmInfo) string {
 	base := path.Base(p)
 	srcs := map[string]bool{}
 	for _, r := range rpms {
-		if oursVendor(r.Vendor) && (r.Name == base || r.Name == "percona-"+base) {
+		if cvereport.OursVendor(r.Vendor) && (r.Name == base || r.Name == "percona-"+base) {
 			srcs[r.Src] = true
 		}
 	}
@@ -55,7 +52,7 @@ func pythonOwner(name, version string, rpms []rpmInfo) string {
 	want := normLangName(name)
 	srcs := map[string]bool{}
 	for _, r := range rpms {
-		if oursVendor(r.Vendor) && r.Version == version && normLangName(r.Name) == want {
+		if cvereport.OursVendor(r.Vendor) && r.Version == version && normLangName(r.Name) == want {
 			srcs[r.Src] = true
 		}
 	}

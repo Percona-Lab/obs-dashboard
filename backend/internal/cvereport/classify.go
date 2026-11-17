@@ -30,6 +30,12 @@ const (
 	goRuntimePkg  = "golang"
 )
 
+// OursVendor reports whether an RPM vendor is the team's: it starts with
+// Percona or obs://.
+func OursVendor(vendor string) bool {
+	return strings.HasPrefix(vendor, "Percona") || strings.HasPrefix(vendor, "obs://")
+}
+
 // Classify places one finding. name is the package to bump (or the file
 // path / package name when no owner is known). Vendor rule: Percona or obs://
 // is ours; Red Hat, Inc. or Fedora Project is base OS; anything else is
@@ -46,7 +52,7 @@ func Classify(f model.CveFinding) (list, name, kind string) {
 		return ListUnclassified, name, KindUnclassified
 	}
 	switch {
-	case strings.HasPrefix(f.Vendor, "Percona") || strings.HasPrefix(f.Vendor, "obs://"):
+	case OursVendor(f.Vendor):
 		return ListOurs, name, KindOBSPackage
 	case f.Vendor == "Red Hat, Inc." || f.Vendor == "Fedora Project":
 		return ListBaseOS, name, KindBaseOS
@@ -63,6 +69,9 @@ func classifyLang(f model.CveFinding) (string, string, string) {
 		return ListOurs, f.Owner, KindBundled
 	case f.Type == typeGoBinary:
 		return ListOurs, f.Path, KindBundled
+	}
+	if f.Path == "" {
+		return ListOurs, f.PkgName, KindBundled
 	}
 	return ListOurs, f.PkgName + " (" + f.Path + ")", KindBundled
 }

@@ -67,6 +67,27 @@ describe('CveStagingView', () => {
     expect(mountView().find('[data-testid="cve-staging-header"]').text()).toBe('2 things to bump · 4 CVEs · 2 images')
   })
 
+  it('shows both fix lines for one package at two installed versions', async () => {
+    const fix = (pkg: string, installed: string, fixed: string) => ({ pkg, installed, fixed })
+    const head = fix('a', '1', '2'), tail = fix('z', '1', '2')
+    const g1 = fix('grpc', '1.0', '1.1'), g2 = fix('grpc', '1.2', '1.3')
+    const withFixes = (fixes: ReturnType<typeof fix>[]) => ({ ours: [{ ...etcd(), fixes }], base_os: [], unclassified: [], cves: 1, images: 1 })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mid = fix('b', '1', '2')
+    const w = mountView({ staging: withFixes([head, g1, mid, tail]) })
+    await w.setProps({ staging: withFixes([head, mid, g1, g2, tail]) })
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('Duplicate keys'))).toHaveLength(0)
+    warn.mockRestore()
+    const text = rowOf(w, 'ours|etcd').text()
+    expect(text).toContain('grpc 1.0 → 1.1')
+    expect(text).toContain('grpc 1.2 → 1.3')
+  })
+
+  it('uses the singular for one thing, one CVE and one image', () => {
+    const w = mountView({ staging: { ours: [etcd()], base_os: [], unclassified: [], cves: 1, images: 1 } })
+    expect(w.find('[data-testid="cve-staging-header"]').text()).toBe('1 thing to bump · 1 CVE · 1 image')
+  })
+
   it('renders Ours and Base OS, and Not classified only with rows', () => {
     const w = mountView()
     expect(w.text()).toContain('Ours to bump')
