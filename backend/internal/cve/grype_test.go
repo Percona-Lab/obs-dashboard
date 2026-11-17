@@ -89,3 +89,15 @@ func TestMergeFindings(t *testing.T) {
 		t.Errorf("order: %+v %+v", got[2], got[3])
 	}
 }
+
+func TestParseGrypeOutputMatchesField(t *testing.T) {
+	for _, in := range []string{`{}`, `null`} {
+		if _, err := parseGrypeOutput([]byte(in), nil); err == nil || !strings.Contains(err.Error(), "no matches field") {
+			t.Errorf("%s: err = %v", in, err)
+		}
+	}
+	got, err := parseGrypeOutput([]byte(`{"matches":[]}`), nil)
+	if err != nil || len(got) != 0 {
+		t.Errorf("empty matches: got=%v err=%v", got, err)
+	}
+}

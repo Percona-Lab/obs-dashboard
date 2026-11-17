@@ -442,7 +442,6 @@ func TestScanFailsWhenGrypeFails(t *testing.T) {
 		}
 		return []byte(trivyCleanJSON), nil
 	})
-	time.Sleep(5 * time.Millisecond)
 	failingGrype(s) // swap the exec fake on the same scanner/DB
 	s.ScanNow(context.Background(), mergeReq)
 
@@ -482,5 +481,42 @@ func TestScanSkipsGrypeWhenTrivyFails(t *testing.T) {
 	s.ScanNow(context.Background(), mergeReq)
 	if !slices.Equal(names, []string{"trivy"}) {
 		t.Errorf("calls = %v, want only trivy", names)
+	}
+}
+
+func TestScanSkipsGrypeWhenContextCancelled(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var names []string
+	s := cve.NewScanner(db, hub.New(), 1, cve.WithExecFn(func(_ context.Context, name string, args ...string) ([]byte, error) {
+		names = append(names, name)
+		if name == "trivy" {
+			cancel()
+			return []byte(trivyCleanJSON), nil
+		}
+		return []byte(grypeEmptyJSON), nil
+	}))
+	s.ScanNow(ctx, mergeReq)
+
+	if slices.Contains(names, "grype") {
+		t.Errorf("grype was called: %v", names)
+	}
+	scans, err := store.QueryCveScans(db, "proj", "mypkg")
+	if err != nil || len(scans) != 0 {
+		t.Fatalf("scans=%d err=%v", len(scans), err)
+	}
+	events, err := store.QueryEvents(db, "proj", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.Type == model.EventCVEScanFailed {
+			t.Errorf("unexpected scan-failed event: %+v", e)
+		}
 	}
 }

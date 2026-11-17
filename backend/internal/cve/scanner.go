@@ -303,6 +303,9 @@ func (s *Scanner) scanPackage(ctx context.Context, req ScanRequest) {
 			s.appendScanFailed(req, target, obsURL, err)
 			continue
 		}
+		if ctx.Err() != nil {
+			return
+		}
 		grypeFindings, err := s.runGrype(ctx, imageRef, platform, rpms)
 		if err != nil {
 			slog.Warn("cve: grype failed", "pkg", req.Package, "arch", target.Arch, "err", err)
