@@ -2,6 +2,8 @@ package cve_test
 
 import (
 	"context"
+	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -211,5 +213,79 @@ func TestScannerUsesTargetInstanceURLs(t *testing.T) {
 	})
 	if gotRef != "reg.percona/ppg:17:containers/ubi9/pg:17.5" {
 		t.Errorf("image ref = %q", gotRef)
+	}
+}
+
+func TestParseTrivyOutputClassificationFields(t *testing.T) {
+	data, err := os.ReadFile("testdata/trivy-listall.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := cve.NewScanner(db, hub.New(), 1, cve.WithExecFn(func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return data, nil
+	}))
+	s.ScanNow(context.Background(), cve.ScanRequest{
+		Project: "proj", Package: "mypkg", PrimaryTag: "1.0",
+		Targets: []model.Target{{Repo: "images", Arch: "x86_64", State: "succeeded"}},
+	})
+	scans, err := store.QueryCveScans(db, "proj", "mypkg")
+	if err != nil || len(scans) != 1 {
+		t.Fatalf("scans=%d err=%v", len(scans), err)
+	}
+	scan := scans[0]
+	if scan.CriticalCount != 2 || scan.HighCount != 6 {
+		t.Errorf("counts: critical=%d high=%d", scan.CriticalCount, scan.HighCount)
+	}
+	byID := map[string]model.CveFinding{}
+	for _, f := range scan.Findings {
+		byID[f.ID] = f
+	}
+	py := "usr/lib/python3.12/site-packages/dnspython-2.9.0.dist-info/METADATA"
+	want := []struct{ id, class, typ, path, src, vendor, owner string }{
+		{"CVE-2026-0001", "os-pkgs", "redhat", "", "krb5", "Red Hat, Inc.", ""},
+		{"CVE-2026-0002", "os-pkgs", "redhat", "", "percona-pgbouncer", "Percona, LLC", ""},
+		{"CVE-2026-0003", "os-pkgs", "redhat", "", "", "", ""},
+		{"CVE-2026-0004", "lang-pkgs", "gobinary", "usr/sbin/gosu", "", "", "gosu"},
+		{"CVE-2026-0005", "lang-pkgs", "gobinary", "usr/sbin/gosu", "", "", "gosu"},
+		{"CVE-2026-0006", "lang-pkgs", "gobinary", "usr/local/bin/mystery", "", "", ""},
+		{"CVE-2026-0007", "lang-pkgs", "python-pkg", py, "", "", "python3.12-dns"},
+		{"CVE-2026-0008", "lang-pkgs", "python-pkg", "opt/app/requests-2.0.0.dist-info/METADATA", "", "", ""},
+	}
+	for _, w := range want {
+		f, ok := byID[w.id]
+		if !ok {
+			t.Errorf("%s missing", w.id)
+			continue
+		}
+		got := [6]string{f.Class, f.Type, f.Path, f.Src, f.Vendor, f.Owner}
+		exp := [6]string{w.class, w.typ, w.path, w.src, w.vendor, w.owner}
+		if got != exp {
+			t.Errorf("%s: got %q want %q", w.id, got, exp)
+		}
+	}
+}
+
+func TestRunTrivyListsAllPackages(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var args []string
+	s := cve.NewScanner(db, hub.New(), 1, cve.WithExecFn(func(ctx context.Context, name string, a ...string) ([]byte, error) {
+		args = a
+		return []byte(trivyCleanJSON), nil
+	}))
+	s.ScanNow(context.Background(), cve.ScanRequest{
+		Project: "proj", Package: "mypkg", PrimaryTag: "1.0",
+		Targets: []model.Target{{Repo: "images", Arch: "x86_64", State: "succeeded"}},
+	})
+	if !slices.Contains(args, "--list-all-pkgs") {
+		t.Errorf("args missing --list-all-pkgs: %v", args)
 	}
 }

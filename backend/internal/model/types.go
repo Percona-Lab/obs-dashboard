@@ -63,6 +63,12 @@ type CveFinding struct {
 	FixedVersion     string `json:"fixed"`
 	Severity         string `json:"severity"`
 	Title            string `json:"title"`
+	Class            string `json:"class,omitempty"`    // trivy result Class: "os-pkgs" | "lang-pkgs"
+	Type             string `json:"pkg_type,omitempty"` // trivy result Type: "redhat", "gobinary", "python-pkg", …
+	Path             string `json:"path,omitempty"`     // binary (gobinary) or package file (other lang-pkgs); empty for RPMs
+	Src              string `json:"src,omitempty"`      // RPM source package name
+	Vendor           string `json:"vendor,omitempty"`   // RPM vendor (trivy "Maintainer")
+	Owner            string `json:"owner,omitempty"`    // source package of the RPM that ships Path, when resolved
 }
 
 type CveScan struct {

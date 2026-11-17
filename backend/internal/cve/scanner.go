@@ -345,6 +345,7 @@ func (s *Scanner) runTrivy(ctx context.Context, imageRef, platform, repo, arch s
 		"--platform", "linux/"+platform,
 		"--severity", "HIGH,CRITICAL",
 		"--ignore-unfixed",
+		"--list-all-pkgs",
 		"-f", "json",
 		"-q",
 		imageRef,
@@ -368,9 +369,22 @@ func (s *Scanner) runTrivy(ctx context.Context, imageRef, platform, repo, arch s
 
 type trivyOutput struct {
 	Results []struct {
+		Target   string `json:"Target"`
+		Class    string `json:"Class"`
+		Type     string `json:"Type"`
+		Packages []struct {
+			ID         string `json:"ID"`
+			Name       string `json:"Name"`
+			Version    string `json:"Version"`
+			SrcName    string `json:"SrcName"`
+			Maintainer string `json:"Maintainer"`
+			FilePath   string `json:"FilePath"`
+		} `json:"Packages"`
 		Vulnerabilities []struct {
 			VulnerabilityID  string `json:"VulnerabilityID"`
+			PkgID            string `json:"PkgID"`
 			PkgName          string `json:"PkgName"`
+			PkgPath          string `json:"PkgPath"`
 			InstalledVersion string `json:"InstalledVersion"`
 			FixedVersion     string `json:"FixedVersion"`
 			Severity         string `json:"Severity"`
@@ -390,6 +404,21 @@ func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, 
 		ImageRef:  imageRef,
 		ScannedAt: time.Now().UTC(),
 	}
+
+	// RPMs first: language findings are matched against them for ownership.
+	var rpms []rpmInfo
+	rpmByID := map[string]rpmInfo{}
+	for _, result := range raw.Results {
+		if result.Class != "os-pkgs" {
+			continue
+		}
+		for _, p := range result.Packages {
+			r := rpmInfo{Name: p.Name, Version: p.Version, Src: p.SrcName, Vendor: p.Maintainer}
+			rpms = append(rpms, r)
+			rpmByID[p.ID] = r
+		}
+	}
+
 	for _, result := range raw.Results {
 		for _, v := range result.Vulnerabilities {
 			f := model.CveFinding{
@@ -399,6 +428,30 @@ func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, 
 				FixedVersion:     v.FixedVersion,
 				Severity:         v.Severity,
 				Title:            v.Title,
+				Class:            result.Class,
+				Type:             result.Type,
+			}
+			switch {
+			case result.Class == "os-pkgs":
+				if r, ok := rpmByID[v.PkgID]; ok {
+					f.Src, f.Vendor = r.Src, r.Vendor
+				}
+			case result.Class == "lang-pkgs" && result.Type == "gobinary":
+				f.Path = result.Target
+				f.Owner = goBinaryOwner(f.Path, rpms)
+			case result.Class == "lang-pkgs":
+				f.Path = v.PkgPath
+				if f.Path == "" {
+					for _, p := range result.Packages {
+						if p.Name == v.PkgName && p.Version == v.InstalledVersion {
+							f.Path = p.FilePath
+							break
+						}
+					}
+				}
+				if result.Type == "python-pkg" {
+					f.Owner = pythonOwner(v.PkgName, v.InstalledVersion, rpms)
+				}
 			}
 			scan.Findings = append(scan.Findings, f)
 			switch v.Severity {
