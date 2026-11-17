@@ -2,8 +2,9 @@ import { watch, watchEffect, onMounted, ref, type Ref } from 'vue'
 import type { Context } from '../types/api'
 import { PPG_STAGING_CONTEXT } from '../lib/contexts'
 import type { WindowKey } from '../types/overview'
+import type { CveView } from '../types/cveReport'
 
-export type MainTab = 'board' | 'artifacts' | 'overview' | 'release' | 'settings'
+export type MainTab = 'board' | 'artifacts' | 'overview' | 'release' | 'settings' | 'cves'
 
 export function contextToKey(ctx: Context): string {
   const parts = ctx.prefix.split(':')
@@ -30,6 +31,7 @@ interface UrlStateOptions {
   artifactsContexts: Ref<Context[]>
   overviewWindow: Ref<WindowKey>
   activeInstances: Ref<string[]>
+  cveView: Ref<CveView>
 }
 
 export function useUrlState(state: UrlStateOptions): void {
@@ -37,7 +39,7 @@ export function useUrlState(state: UrlStateOptions): void {
     mainTab, boardCtx, version, activeTags,
     artifactsCtx, artifactsVersion, artifactsTab,
     boardContexts, artifactsContexts, overviewWindow,
-    activeInstances,
+    activeInstances, cveView,
   } = state
 
   // Pending raw URL keys awaiting context list population (PR contexts load async)
@@ -50,7 +52,7 @@ export function useUrlState(state: UrlStateOptions): void {
     const params = new URLSearchParams(window.location.search)
 
     const tab = params.get('tab')
-    if (tab === 'board' || tab === 'artifacts' || tab === 'overview' || tab === 'release' || tab === 'settings') mainTab.value = tab
+    if (tab === 'board' || tab === 'artifacts' || tab === 'overview' || tab === 'release' || tab === 'settings' || tab === 'cves') mainTab.value = tab
 
     const ver = params.get('version')
     if (ver) version.value = ver
@@ -69,6 +71,9 @@ export function useUrlState(state: UrlStateOptions): void {
 
     const owin = params.get('owin')
     if (owin === '24h' || owin === '48h' || owin === '7d') overviewWindow.value = owin
+
+    const cview = params.get('cview')
+    if (cview === 'released' || cview === 'images') cveView.value = cview
 
     const ctxKey = params.get('ctx')
     if (ctxKey) {
@@ -133,6 +138,8 @@ export function useUrlState(state: UrlStateOptions): void {
     if (artifactsTab.value !== 'packages') params.set('sub', artifactsTab.value)
 
     if (overviewWindow.value !== '24h') params.set('owin', overviewWindow.value)
+
+    if (cveView.value !== 'staging') params.set('cview', cveView.value)
 
     const search = params.toString()
     history.replaceState(null, '', search ? `?${search}` : window.location.pathname)

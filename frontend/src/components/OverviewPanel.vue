@@ -3,11 +3,10 @@ import { computed } from 'vue'
 import type { WindowKey } from '../types/overview'
 import { useOverviewData } from '../composables/useOverviewData'
 import { useInstances } from '../composables/useInstances'
-import { PROJECT_ACCENTS, formatFixHours } from '../lib/overview'
+import { projectAccent, formatFixHours } from '../lib/overview'
 import StatCard from './StatCard.vue'
 import CategoryBreakdown from './CategoryBreakdown.vue'
 import RebuildBarChart from './RebuildBarChart.vue'
-import CveExposureTable from './CveExposureTable.vue'
 import MetricsPanel from './MetricsPanel.vue'
 
 const props = defineProps<{
@@ -51,8 +50,7 @@ const WINDOWS: WindowKey[] = ['24h', '48h', '7d']
 const accentOrder = computed(() => [...projects.value].map(p => p.project).sort())
 
 function accentOf(project: string): string {
-  const idx = accentOrder.value.indexOf(project)
-  return PROJECT_ACCENTS[Math.max(0, idx) % PROJECT_ACCENTS.length]
+  return projectAccent(accentOrder.value, project)
 }
 
 // Rebuilds: strictly devel/staging/PRs (user decision — Releases stays in
@@ -228,7 +226,6 @@ const cveSegments = computed(() => {
       </div>
 
       <RebuildBarChart :bars="rebuildBars" :window-label="win" :accent-of="accentOf" />
-      <CveExposureTable :projects="projects" :accent-of="accentOf" />
       <MetricsPanel />
     </template>
   </div>

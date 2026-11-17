@@ -5,6 +5,9 @@ import AppHeader from './AppHeader.vue'
 import { useAuth, resetAuthForTests } from '../composables/useAuth'
 import { useUpgrades, resetUpgradesForTests } from '../composables/useUpgrades'
 import { useRelease, resetReleaseForTests } from '../composables/useRelease'
+import { useCveReport, resetCveReportForTests } from '../composables/useCveReport'
+import { resetCveSeenForTests } from '../composables/useCveSeen'
+import { vi, afterEach } from 'vitest'
 
 function mountHeader() {
   return mount(AppHeader, { props: { theme: 'light', mainTab: 'overview' } })
@@ -76,5 +79,36 @@ describe('AppHeader release tab', () => {
     expect(w.emitted('update:main-tab')).toEqual([['release']])
     useRelease().enabled.value = false
     expect(mountHeader().find('[data-testid="release-tab"]').exists()).toBe(false)
+  })
+})
+
+describe('AppHeader CVEs tab', () => {
+  beforeEach(() => { localStorage.clear(); resetCveSeenForTests(); resetCveReportForTests() })
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function loadReport(ids: string[]) {
+    const entries = ids.map(id => ({ id, pkg: 'p', severity: 'HIGH', title: 't', seen_key: `${id}|p|` }))
+    const rows = ids.length ? [{ key: 'ours|p', name: 'p', kind: 'obs_package', worst: 'HIGH', cves: ids.length, fixes: [], entries, images: [] }] : []
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, statusText: 'OK', json: async () => ({ generated_at: '', staging: { ours: rows, base_os: [], unclassified: [], cves: ids.length, images: 1 }, released: [] }) })))
+    await useCveReport().refresh()
+  }
+
+  it('is shown when signed out, after Artifacts, and emits cves on click', async () => {
+    const w = mountHeader()
+    const tabs = w.findAll('.tab-pill').map(b => b.text())
+    expect(tabs.indexOf('Artifacts')).toBeGreaterThanOrEqual(0)
+    expect(w.findAll('.tab-pill')[tabs.indexOf('Artifacts') + 1].attributes('data-testid')).toBe('cves-tab')
+    await w.find('[data-testid="cves-tab"]').trigger('click')
+    expect(w.emitted('update:main-tab')).toEqual([['cves']])
+  })
+
+  it('shows "3 new" with three unseen entries', async () => {
+    await loadReport(['CVE-1', 'CVE-2', 'CVE-3'])
+    expect(mountHeader().find('[data-testid="cves-new-badge"]').text()).toBe('3 new')
+  })
+
+  it('shows no badge with none', async () => {
+    await loadReport([])
+    expect(mountHeader().find('[data-testid="cves-new-badge"]').exists()).toBe(false)
   })
 })
