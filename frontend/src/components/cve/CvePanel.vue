@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { CveStaging, CveView } from '../../types/cveReport'
+import type { CveStaging, CveView, ReleasedImage } from '../../types/cveReport'
 import { useCveReport } from '../../composables/useCveReport'
 import { useOverviewData } from '../../composables/useOverviewData'
 import { projectAccent } from '../../lib/overview'
 import type { WindowKey } from '../../types/overview'
 import CveExposureTable from '../CveExposureTable.vue'
 import CveStagingView from './CveStagingView.vue'
+import CveReleasedView from './CveReleasedView.vue'
 
 const props = defineProps<{ view: CveView }>()
 const emit = defineEmits<{ 'update:view': [v: CveView] }>()
@@ -14,7 +15,7 @@ const emit = defineEmits<{ 'update:view': [v: CveView] }>()
 const { report, loading, error, refresh } = useCveReport()
 const { projects } = useOverviewData(ref<WindowKey>('24h'))
 
-// Set by the Released view (Task 10) to jump to a Staging row.
+// Set by the Released view to jump to a Staging row.
 const focusRowKey = ref<string | null>(null)
 
 const VIEWS: { key: CveView; label: string }[] = [
@@ -27,6 +28,16 @@ const VIEWS: { key: CveView; label: string }[] = [
 const accentOrder = computed(() => projects.value.map(p => p.project).sort())
 function accentOf(project: string): string {
   return projectAccent(accentOrder.value, project)
+}
+
+function selectView(v: CveView) {
+  focusRowKey.value = null
+  emit('update:view', v)
+}
+
+function openStagingRow(key: string) {
+  focusRowKey.value = key
+  emit('update:view', 'staging')
 }
 
 defineExpose({ focusRowKey })
@@ -45,7 +56,7 @@ defineExpose({ focusRowKey })
             ? 'bg-bg-card text-text-primary font-bold border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
             : 'bg-transparent text-text-muted font-medium border-transparent'"
           :aria-pressed="props.view === v.key"
-          @click="emit('update:view', v.key)"
+          @click="selectView(v.key)"
         >{{ v.label }}</button>
       </div>
     </div>
@@ -65,7 +76,7 @@ defineExpose({ focusRowKey })
         <div v-for="i in 5" :key="i" class="h-[38px] bg-bg-muted rounded-[8px] animate-pulse" />
       </div>
       <CveStagingView v-else-if="props.view === 'staging' && report" :staging="report.staging as CveStaging" :focus-row-key="focusRowKey" />
-      <div v-else data-testid="cve-released-placeholder" />
+      <CveReleasedView v-else-if="props.view === 'released' && report" :released="report.released as ReleasedImage[]" @open-staging-row="openStagingRow" />
     </template>
   </div>
 </template>
