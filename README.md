@@ -8,6 +8,7 @@ The dashboard polls OBS on a schedule and consumes RabbitMQ build events, stores
 - Package cards showing live rollup state (building, failed, succeeded, published) across all PPG OBS projects.
 - Per-target build event log: build started, succeeded, failed, published — filterable by tag and time window.
 - Artifacts view — binary package download links and container image pull commands, browsable by version, repo, and arch; covers dev builds, releases, and PRs.
+- CVEs tab — the packages to bump to clear HIGH and CRITICAL CVEs in staging images, what the current staging image already fixes for each released image, and the per-image CVE table; new entries since your last look are marked.
 - Tag-based filtering (RPM, DEB, container) and version selector.
 - PR build tracking: dedicated board context per OBS PR branch.
 - SSE-based live updates — cards and event log update in real time without a page refresh.
