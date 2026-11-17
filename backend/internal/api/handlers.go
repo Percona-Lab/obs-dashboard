@@ -556,6 +556,28 @@ func cveScansHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// cveFindingsHandler returns a handler for GET /api/cve/findings.
+// It lists every per-arch image scan that currently has HIGH or CRITICAL
+// findings, across all images, each with its project, package and findings.
+// The optional ?project= param is a project prefix: "ppg:staging" keeps that
+// project and its subprojects. No match returns an empty array.
+func cveFindingsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scans, err := store.QueryVulnerableScans(db, r.URL.Query().Get("project"))
+		if err != nil {
+			slog.Error("api: cve findings", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if scans == nil {
+			scans = []model.ImageCveScan{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(scans)
+	}
+}
+
 // cveRescanHandler handles POST /api/cve/rescan: it queues a fresh scan of
 // every image that currently has HIGH/CRITICAL CVEs and returns
 // {"queued": N}, the number of images queued.

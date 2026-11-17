@@ -96,6 +96,7 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 
 	r.Get("/api/overview", overviewHandler(db, fleet.Default().Slug, overview))
 	r.Get("/api/cve/scans", cveScansHandler(db))
+	r.Get("/api/cve/findings", cveFindingsHandler(db))
 
 	// State-changing actions: signed-in, allowlisted users only.
 	r.Group(func(r chi.Router) {

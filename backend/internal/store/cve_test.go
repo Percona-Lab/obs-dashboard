@@ -370,3 +370,105 @@ func TestQueryVulnerableImages(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryVulnerableScans(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	at := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	vuln := func(arch string) model.CveScan {
+		return model.CveScan{
+			Repo: "images", Arch: arch, ImageRef: "registry.example/img:1", ScannedAt: at,
+			HighCount: 1,
+			Findings:  []model.CveFinding{{ID: "CVE-2026-0001", PkgName: "openssl", Severity: "HIGH"}},
+		}
+	}
+	clean := model.CveScan{Repo: "images", Arch: "x86_64", ImageRef: "registry.example/clean:1", ScannedAt: at}
+
+	seed := []struct {
+		project, pkg string
+		scan         model.CveScan
+	}{
+		{"ppg:staging:18:containers", "pg18", vuln("x86_64")},
+		{"ppg:staging:18:containers", "pg18", vuln("aarch64")},
+		{"ppg:staging:18:containers", "cleanimg", clean},
+		{"ppg:staging", "toplevel", vuln("x86_64")},
+		{"ppg:staging2:18:containers", "lookalike", vuln("x86_64")},
+		{"ppg:devel:18:containers", "pg18", vuln("x86_64")},
+	}
+	for _, s := range seed {
+		if err := store.UpsertCveScan(db, s.project, s.pkg, s.scan); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	keys := func(scans []model.ImageCveScan) []string {
+		var out []string
+		for _, s := range scans {
+			out = append(out, s.Project+"/"+s.Package+"/"+s.Arch)
+		}
+		return out
+	}
+	equal := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	t.Run("no prefix returns every vulnerable scan, clean ones omitted", func(t *testing.T) {
+		scans, err := store.QueryVulnerableScans(db, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{
+			"ppg:devel:18:containers/pg18/x86_64",
+			"ppg:staging/toplevel/x86_64",
+			"ppg:staging2:18:containers/lookalike/x86_64",
+			"ppg:staging:18:containers/pg18/aarch64",
+			"ppg:staging:18:containers/pg18/x86_64",
+		}
+		if got := keys(scans); !equal(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		if len(scans[0].Findings) != 1 || scans[0].Findings[0].ID != "CVE-2026-0001" {
+			t.Fatalf("findings not attached: %+v", scans[0])
+		}
+		if scans[0].CveSince == nil {
+			t.Fatal("expected cve_since on a vulnerable scan")
+		}
+	})
+
+	t.Run("prefix matches the project itself and its subprojects only", func(t *testing.T) {
+		scans, err := store.QueryVulnerableScans(db, "ppg:staging")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{
+			"ppg:staging/toplevel/x86_64",
+			"ppg:staging:18:containers/pg18/aarch64",
+			"ppg:staging:18:containers/pg18/x86_64",
+		}
+		if got := keys(scans); !equal(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("LIKE wildcards in the prefix are literal", func(t *testing.T) {
+		scans, err := store.QueryVulnerableScans(db, "ppg:%")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(scans) != 0 {
+			t.Fatalf("expected no match, got %v", keys(scans))
+		}
+	})
+}

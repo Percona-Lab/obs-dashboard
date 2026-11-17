@@ -77,6 +77,14 @@ type CveScan struct {
 	Findings      []CveFinding `json:"findings,omitempty"`
 }
 
+// ImageCveScan is a CveScan together with the image it belongs to, for
+// listings that span more than one image.
+type ImageCveScan struct {
+	Project string `json:"project"`
+	Package string `json:"package"`
+	CveScan
+}
+
 type CvePeriod struct {
 	Project    string    `json:"project"`
 	Package    string    `json:"package"`
