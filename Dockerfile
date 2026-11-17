@@ -17,10 +17,12 @@ RUN CGO_ENABLED=0 go build -ldflags "-X github.com/percona/obs-dashboard/interna
 
 # Stage 3: minimal runtime image
 FROM ghcr.io/aquasecurity/trivy:latest AS trivy
+FROM ghcr.io/anchore/grype:latest AS grype
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
+COPY --from=grype /grype /usr/local/bin/grype
 COPY --from=backend-build /obsboard /obsboard
 COPY --from=frontend-build /app/dist /frontend
 ENV FRONTEND_DIR=/frontend
