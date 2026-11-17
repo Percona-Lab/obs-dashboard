@@ -573,6 +573,82 @@ func TestCveScansRoute(t *testing.T) {
 	}
 }
 
+func TestCveFindingsHandler(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	h := cveFindingsHandler(db)
+	get := func(url string) []model.ImageCveScan {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d", url, rec.Code)
+		}
+		if strings.TrimSpace(rec.Body.String()) == "null" {
+			t.Fatalf("%s: expected a JSON array, got null", url)
+		}
+		var scans []model.ImageCveScan
+		if err := json.NewDecoder(rec.Body).Decode(&scans); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return scans
+	}
+
+	if scans := get("/api/cve/findings"); len(scans) != 0 {
+		t.Fatalf("empty DB: expected no scans, got %d", len(scans))
+	}
+
+	for _, project := range []string{"ppg:staging:18:containers", "ppg:devel:18:containers"} {
+		scan := model.CveScan{
+			Repo:          "images",
+			Arch:          "x86_64",
+			ImageRef:      "registry.example/percona-postgresql18:latest",
+			ScannedAt:     time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+			CriticalCount: 1,
+			Findings: []model.CveFinding{{
+				ID: "CVE-2026-0001", PkgName: "openssl", InstalledVersion: "3.0.1",
+				FixedVersion: "3.0.2", Severity: "CRITICAL", Title: "test vulnerability",
+			}},
+		}
+		if err := store.UpsertCveScan(db, project, "percona-postgresql18", scan); err != nil {
+			t.Fatalf("UpsertCveScan: %v", err)
+		}
+	}
+
+	if scans := get("/api/cve/findings"); len(scans) != 2 {
+		t.Fatalf("no filter: expected 2 scans, got %d", len(scans))
+	}
+
+	scans := get("/api/cve/findings?project=ppg:staging")
+	if len(scans) != 1 {
+		t.Fatalf("filtered: expected 1 scan, got %d", len(scans))
+	}
+	got := scans[0]
+	if got.Project != "ppg:staging:18:containers" || got.Package != "percona-postgresql18" ||
+		got.Repo != "images" || got.Arch != "x86_64" || got.CriticalCount != 1 {
+		t.Fatalf("unexpected scan: %+v", got)
+	}
+	if len(got.Findings) != 1 || got.Findings[0].ID != "CVE-2026-0001" {
+		t.Fatalf("unexpected findings: %+v", got.Findings)
+	}
+}
+
+func TestCveFindingsRoute(t *testing.T) {
+	router := setupTestServer(t)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/cve/findings", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("route not registered or failing: expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected JSON, got %q", ct)
+	}
+}
+
 func TestProductsTierValidation(t *testing.T) {
 	router := setupTestServer(t)
 	for _, path := range []string{

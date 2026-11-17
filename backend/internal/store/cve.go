@@ -80,7 +80,7 @@ func UpsertCveScan(db *sql.DB, project, pkg string, scan model.CveScan) error {
 // QueryCveScans returns all arch scan results for a package.
 func QueryCveScans(db *sql.DB, project, pkg string) ([]model.CveScan, error) {
 	rows, err := db.Query(`
-		SELECT repo, arch, image_ref, scanned_at, critical_count, high_count, findings_json, cve_since, clean_since
+		SELECT project, package, repo, arch, image_ref, scanned_at, critical_count, high_count, findings_json, cve_since, clean_since
 		FROM cve_scans WHERE project = ? AND package = ?`,
 		project, pkg,
 	)
@@ -88,7 +88,15 @@ func QueryCveScans(db *sql.DB, project, pkg string) ([]model.CveScan, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanCveRows(rows)
+	rowScans, err := scanImageCveRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	var scans []model.CveScan
+	for _, s := range rowScans {
+		scans = append(scans, s.CveScan)
+	}
+	return scans, nil
 }
 
 // AttachCveScans batch-fetches CVE scan results for a slice of packages and
@@ -125,32 +133,37 @@ func AttachCveScans(db *sql.DB, packages []*model.Package) error {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var project, pkg string
-		var scan model.CveScan
-		var scannedAtStr string
-		var findingsJSON string
-		var cveSinceStr, cleanSinceStr sql.NullString
-		if err := rows.Scan(&project, &pkg, &scan.Repo, &scan.Arch, &scan.ImageRef,
-			&scannedAtStr, &scan.CriticalCount, &scan.HighCount, &findingsJSON,
-			&cveSinceStr, &cleanSinceStr); err != nil {
-			return err
-		}
-		var parseErr error
-		scan.ScannedAt, parseErr = time.Parse(time.RFC3339, scannedAtStr)
-		if parseErr != nil {
-			return fmt.Errorf("cve_scans: invalid scanned_at %q: %w", scannedAtStr, parseErr)
-		}
-		applyNullableTimestamps(&scan, cveSinceStr, cleanSinceStr)
-		if findingsJSON != "" && findingsJSON != "[]" {
-			_ = json.Unmarshal([]byte(findingsJSON), &scan.Findings)
-		}
-		k := project + "/" + pkg
-		if p, ok := index[k]; ok {
-			p.CveScans = append(p.CveScans, scan)
+	scans, err := scanImageCveRows(rows)
+	if err != nil {
+		return err
+	}
+	for _, s := range scans {
+		if p, ok := index[s.Project+"/"+s.Package]; ok {
+			p.CveScans = append(p.CveScans, s.CveScan)
 		}
 	}
-	return rows.Err()
+	return nil
+}
+
+// QueryVulnerableScans returns every per-arch scan that currently has HIGH or
+// CRITICAL findings, with the findings, ordered by project, package, repo,
+// arch. A non-empty projectPrefix keeps only that project and its
+// subprojects: "ppg:staging" matches "ppg:staging" and "ppg:staging:18", not
+// "ppg:staging2". The prefix is compared literally, not as a LIKE pattern.
+func QueryVulnerableScans(db *sql.DB, projectPrefix string) ([]model.ImageCveScan, error) {
+	rows, err := db.Query(`
+		SELECT project, package, repo, arch, image_ref, scanned_at, critical_count, high_count, findings_json, cve_since, clean_since
+		FROM cve_scans
+		WHERE critical_count + high_count > 0
+		  AND (?1 = '' OR project = ?1 OR substr(project, 1, length(?1) + 1) = ?1 || ':')
+		ORDER BY project, package, repo, arch`,
+		projectPrefix,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanImageCveRows(rows)
 }
 
 // QueryCvePeriods returns completed CVE episodes for a package, newest first.
@@ -229,14 +242,17 @@ func parseRFC3339(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, s)
 }
 
-func scanCveRows(rows *sql.Rows) ([]model.CveScan, error) {
-	var scans []model.CveScan
+// scanImageCveRows reads rows of (project, package, repo, arch, image_ref,
+// scanned_at, critical_count, high_count, findings_json, cve_since,
+// clean_since).
+func scanImageCveRows(rows *sql.Rows) ([]model.ImageCveScan, error) {
+	var scans []model.ImageCveScan
 	for rows.Next() {
-		var scan model.CveScan
+		var scan model.ImageCveScan
 		var scannedAtStr, findingsJSON string
 		var cveSinceStr, cleanSinceStr sql.NullString
-		if err := rows.Scan(&scan.Repo, &scan.Arch, &scan.ImageRef, &scannedAtStr,
-			&scan.CriticalCount, &scan.HighCount, &findingsJSON,
+		if err := rows.Scan(&scan.Project, &scan.Package, &scan.Repo, &scan.Arch, &scan.ImageRef,
+			&scannedAtStr, &scan.CriticalCount, &scan.HighCount, &findingsJSON,
 			&cveSinceStr, &cleanSinceStr); err != nil {
 			return nil, err
 		}
@@ -245,7 +261,7 @@ func scanCveRows(rows *sql.Rows) ([]model.CveScan, error) {
 		if parseErr != nil {
 			return nil, fmt.Errorf("cve_scans: invalid scanned_at %q: %w", scannedAtStr, parseErr)
 		}
-		applyNullableTimestamps(&scan, cveSinceStr, cleanSinceStr)
+		applyNullableTimestamps(&scan.CveScan, cveSinceStr, cleanSinceStr)
 		if findingsJSON != "" && findingsJSON != "[]" {
 			_ = json.Unmarshal([]byte(findingsJSON), &scan.Findings)
 		}
