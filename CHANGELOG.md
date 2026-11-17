@@ -19,7 +19,7 @@ an example value. See `deploy/host/README.md`.
 ### Changed
 
 - The CVE table moved from Overview to the "By image" view of the new CVEs tab.
-- After upgrading, images scanned before this version are rescanned once at startup so their findings can be classified. Until the rescan finishes, their packages appear under "Not classified yet".
+- After upgrading, images scanned before this version are rescanned once at startup so their findings can be classified. Until the rescan finishes, their packages appear under "Not classified yet". Entries marked as seen before that rescan finishes may show as new once more afterwards, because the rescan adds the file a library was found in.
 
 ## [0.2.10] - 2026-11-17
 

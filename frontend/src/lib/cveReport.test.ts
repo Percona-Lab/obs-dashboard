@@ -43,5 +43,11 @@ describe('cveReport helpers', () => {
   it('imagesSummary', () => {
     expect(imagesSummary([img('ubi9'), img('ubi9'), img('ubi8')])).toBe('3 images · ubi8, ubi9')
     expect(imagesSummary([img('ubi9')])).toBe('1 image · ubi9')
+    const inProject = (project: string, repo: string): CveImageRef => ({ project, package: 'k', repo, arches: [] })
+    expect(imagesSummary([
+      inProject('ppg:staging:18', 'ubi9'), inProject('ppg:staging:17', 'ubi9'), inProject('ppg:staging:17', 'ubi8'),
+    ])).toBe('3 images · PG 17, 18 · ubi8, ubi9')
+    expect(imagesSummary([inProject('ppg:releases:16:containers', 'ubi9'), inProject('ppg:staging:devel', 'ubi9')]))
+      .toBe('2 images · PG 16 · ubi9')
   })
 })

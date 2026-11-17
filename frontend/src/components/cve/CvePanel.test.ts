@@ -56,6 +56,17 @@ describe('CvePanel', () => {
     expect(w.findComponent({ name: 'CveExposureTable' }).exists()).toBe(true)
   })
 
+  it('fetches overview data only while the By image view is shown', async () => {
+    stubFetch(true)
+    const overviewCalls = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(c => String(c[0]).startsWith('/api/overview')).length
+    const w = mount(CvePanel, { props: { view: 'staging' } })
+    await flushPromises()
+    expect(overviewCalls()).toBe(0)
+    await w.setProps({ view: 'images' })
+    await flushPromises()
+    expect(overviewCalls()).toBeGreaterThan(0)
+  })
+
   it('emits update:view when a segment is clicked', async () => {
     stubFetch(true)
     const w = mount(CvePanel, { props: { view: 'staging' } })
@@ -69,13 +80,18 @@ describe('CvePanel', () => {
     stubFetch(false)
     const w = mount(CvePanel, { props: { view: 'staging' } })
     await w.vm.$nextTick()
-    // the panel itself does not start the fetch; trigger it through Retry-less path
+    // the panel does not start the fetch itself; trigger the first (failing) load here
     const { useCveReport } = await import('../../composables/useCveReport')
     await useCveReport().refresh()
     await flushPromises()
     const err = w.find('[data-testid="cve-report-error"]')
     expect(err.exists()).toBe(true)
     expect(err.find('button').text()).toBe('Retry')
+    stubFetch(true)
+    await err.find('button').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="cve-report-error"]').exists()).toBe(false)
+    expect(w.findComponent({ name: 'CveStagingView' }).exists()).toBe(true)
     await w.setProps({ view: 'images' })
     await flushPromises()
     expect(w.findComponent({ name: 'CveExposureTable' }).exists()).toBe(true)

@@ -289,3 +289,29 @@ func TestRunTrivyListsAllPackages(t *testing.T) {
 		t.Errorf("args missing --list-all-pkgs: %v", args)
 	}
 }
+
+func TestParseTrivyOutputEmptyPkgIDStaysUnclassified(t *testing.T) {
+	data := []byte(`{"Results":[{"Target":"img","Class":"os-pkgs","Type":"redhat",
+"Packages":[{"Name":"noid","Version":"1","SrcName":"noid-src","Maintainer":"Percona, LLC"}],
+"Vulnerabilities":[{"VulnerabilityID":"CVE-2026-9000","PkgName":"other","InstalledVersion":"1","FixedVersion":"2","Severity":"HIGH","Title":"t"}]}]}`)
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := cve.NewScanner(db, hub.New(), 1, cve.WithExecFn(func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return data, nil
+	}))
+	s.ScanNow(context.Background(), cve.ScanRequest{
+		Project: "proj", Package: "mypkg", PrimaryTag: "1.0",
+		Targets: []model.Target{{Repo: "images", Arch: "x86_64", State: "succeeded"}},
+	})
+	scans, err := store.QueryCveScans(db, "proj", "mypkg")
+	if err != nil || len(scans) != 1 || len(scans[0].Findings) != 1 {
+		t.Fatalf("scans=%v err=%v", scans, err)
+	}
+	f := scans[0].Findings[0]
+	if f.Vendor != "" || f.Src != "" {
+		t.Errorf("vendor=%q src=%q, want both empty", f.Vendor, f.Src)
+	}
+}

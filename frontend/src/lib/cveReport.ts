@@ -33,9 +33,19 @@ export function sortRows(rows: CveRow[], isNew: (k: string) => boolean): CveRow[
   return flagged.sort((a, b) => Number(b.fresh) - Number(a.fresh)).map(f => f.row)
 }
 
-// "6 images · ubi8, ubi9"
+// PG major: the project segment right after "ppg:staging:" or "ppg:releases:".
+function pgMajor(project: string): number | null {
+  const m = /^ppg:(?:staging|releases):(\d+)(?::|$)/.exec(project)
+  return m ? Number(m[1]) : null
+}
+
+// "6 images · PG 17, 18 · ubi8, ubi9"
 export function imagesSummary(images: CveImageRef[]): string {
   const repos = [...new Set(images.map(i => i.repo))].sort()
+  const majors = [...new Set(images.map(i => pgMajor(i.project)).filter((m): m is number => m !== null))].sort((a, b) => a - b)
   const n = images.length
-  return `${n} ${n === 1 ? 'image' : 'images'} · ${repos.join(', ')}`
+  const parts = [`${n} ${n === 1 ? 'image' : 'images'}`]
+  if (majors.length) parts.push(`PG ${majors.join(', ')}`)
+  parts.push(repos.join(', '))
+  return parts.join(' · ')
 }

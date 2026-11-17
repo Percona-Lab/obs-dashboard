@@ -79,7 +79,7 @@ const COLS = 'sm:grid-cols-[minmax(0,1.6fr)_minmax(0,2fr)_70px_90px_minmax(0,1.4
           >NEW</span>
         </span>
         <span class="flex flex-col font-mono text-[12.5px] text-text-secondary min-w-0">
-          <span v-for="f in row.fixes" :key="f.pkg" class="break-words">{{ f.pkg }} {{ f.installed }} → {{ f.fixed }}</span>
+          <span v-for="f in row.fixes" :key="`${f.pkg}|${f.installed}|${f.fixed}`" class="break-words">{{ f.pkg }} {{ f.installed }} → {{ f.fixed }}</span>
         </span>
         <span class="sm:text-center font-mono text-[13px] font-semibold">{{ row.cves }}<span class="sm:hidden text-[11px] text-text-muted font-normal"> CVEs</span></span>
         <span

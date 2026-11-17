@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AppHeader from './AppHeader.vue'
 import { useAuth, resetAuthForTests } from '../composables/useAuth'
@@ -7,7 +7,6 @@ import { useUpgrades, resetUpgradesForTests } from '../composables/useUpgrades'
 import { useRelease, resetReleaseForTests } from '../composables/useRelease'
 import { useCveReport, resetCveReportForTests } from '../composables/useCveReport'
 import { resetCveSeenForTests } from '../composables/useCveSeen'
-import { vi, afterEach } from 'vitest'
 
 function mountHeader() {
   return mount(AppHeader, { props: { theme: 'light', mainTab: 'overview' } })

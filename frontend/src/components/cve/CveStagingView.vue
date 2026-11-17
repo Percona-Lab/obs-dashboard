@@ -13,6 +13,13 @@ const { available, markAllSeen } = useCveSeen()
 const { signedIn } = useAuth()
 const { rescanBusy, rescanMsg, rescanFailed, rescan } = useCveRescan()
 
+const headerText = computed(() => {
+  const n = props.staging.ours.length
+  const c = props.staging.cves
+  const i = props.staging.images
+  return `${n} ${n === 1 ? 'thing' : 'things'} to bump · ${c} ${c === 1 ? 'CVE' : 'CVEs'} · ${i} ${i === 1 ? 'image' : 'images'}`
+})
+
 const sections = computed(() => [
   { key: 'ours', title: 'Ours to bump', rows: props.staging.ours, first: 'Package to bump', fix: 'Fix', empty: 'Nothing to bump.' },
   { key: 'base_os', title: 'Base OS', rows: props.staging.base_os, first: 'Package', fix: 'Fix available', empty: 'No base OS fixes pending.' },
@@ -23,7 +30,7 @@ const sections = computed(() => [
 <template>
   <div class="flex flex-col gap-4">
     <div class="flex items-center gap-[10px] flex-wrap">
-      <span data-testid="cve-staging-header" class="text-[13px] text-text-secondary">{{ staging.ours.length }} things to bump · {{ staging.cves }} CVEs · {{ staging.images }} images</span>
+      <span data-testid="cve-staging-header" class="text-[13px] text-text-secondary">{{ headerText }}</span>
       <span
         v-if="signedIn && rescanMsg"
         data-testid="cve-rescan-status"

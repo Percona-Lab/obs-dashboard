@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import type { CveStaging, CveView, ReleasedImage } from '../../types/cveReport'
 import { useCveReport } from '../../composables/useCveReport'
-import { useOverviewData } from '../../composables/useOverviewData'
-import { projectAccent } from '../../lib/overview'
-import type { WindowKey } from '../../types/overview'
-import CveExposureTable from '../CveExposureTable.vue'
+import CveByImageView from './CveByImageView.vue'
 import CveStagingView from './CveStagingView.vue'
 import CveReleasedView from './CveReleasedView.vue'
 
@@ -13,7 +10,6 @@ const props = defineProps<{ view: CveView }>()
 const emit = defineEmits<{ 'update:view': [v: CveView] }>()
 
 const { report, loading, error, refresh } = useCveReport()
-const { projects } = useOverviewData(ref<WindowKey>('24h'))
 
 // Set by the Released view to jump to a Staging row.
 const focusRowKey = ref<string | null>(null)
@@ -23,12 +19,6 @@ const VIEWS: { key: CveView; label: string }[] = [
   { key: 'released', label: 'Released' },
   { key: 'images', label: 'By image' },
 ]
-
-// Same name-sorted accent assignment Overview used.
-const accentOrder = computed(() => projects.value.map(p => p.project).sort())
-function accentOf(project: string): string {
-  return projectAccent(accentOrder.value, project)
-}
 
 function selectView(v: CveView) {
   focusRowKey.value = null
@@ -61,7 +51,7 @@ defineExpose({ focusRowKey })
       </div>
     </div>
 
-    <CveExposureTable v-if="props.view === 'images'" :projects="projects" :accent-of="accentOf" />
+    <CveByImageView v-if="props.view === 'images'" />
 
     <template v-else>
       <div

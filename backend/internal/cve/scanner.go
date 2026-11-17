@@ -431,7 +431,9 @@ func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, 
 		for _, p := range result.Packages {
 			r := rpmInfo{Name: p.Name, Version: p.Version, Src: p.SrcName, Vendor: p.Maintainer}
 			rpms = append(rpms, r)
-			rpmByID[p.ID] = r
+			if p.ID != "" {
+				rpmByID[p.ID] = r
+			}
 		}
 	}
 
@@ -449,6 +451,9 @@ func parseTrivyOutput(data []byte, imageRef, repo, arch string) (model.CveScan, 
 			}
 			switch {
 			case result.Class == "os-pkgs":
+				if v.PkgID == "" {
+					break
+				}
 				if r, ok := rpmByID[v.PkgID]; ok {
 					f.Src, f.Vendor = r.Src, r.Vendor
 				}
