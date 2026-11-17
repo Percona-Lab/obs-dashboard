@@ -56,6 +56,7 @@ export interface CveFinding {
   fixed: string
   severity: 'HIGH' | 'CRITICAL'
   title: string
+  scanners?: string[]
 }
 
 export interface CveScan {
