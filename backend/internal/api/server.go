@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/percona/obs-dashboard/internal/auth"
+	"github.com/percona/obs-dashboard/internal/cvereport"
 	"github.com/percona/obs-dashboard/internal/hub"
 	"github.com/percona/obs-dashboard/internal/obs"
 	"github.com/percona/obs-dashboard/internal/upgrade"
@@ -61,7 +62,8 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 	r.Get("/healthz", healthzHandler)
 	releaseArtifacts := newReleaseArtifactsCache(10 * time.Minute)
 	metadataCache := newBinaryListCache(5 * time.Minute)
-	overview := newOverviewCache(60 * time.Second)
+	overview := newTTLCache[OverviewSnapshot](60 * time.Second)
+	cveReport := newTTLCache[cvereport.Report](30 * time.Second)
 
 	r.Route("/api/products/{product}/{tier}/{version}", func(r chi.Router) {
 		r.Get("/packages", packagesHandler(db))
@@ -97,6 +99,7 @@ func NewRouter(db *sql.DB, h *hub.Hub, fleet *obs.Fleet, ws Statter, telemetryEn
 	r.Get("/api/overview", overviewHandler(db, fleet.Default().Slug, overview))
 	r.Get("/api/cve/scans", cveScansHandler(db))
 	r.Get("/api/cve/findings", cveFindingsHandler(db))
+	r.Get("/api/cve/report", cveReportHandler(db, cveReport))
 
 	// State-changing actions: signed-in, allowlisted users only.
 	r.Group(func(r chi.Router) {

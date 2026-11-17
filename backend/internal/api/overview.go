@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/percona/obs-dashboard/internal/store"
@@ -294,61 +293,6 @@ func buildOverviewSnapshot(window string, now time.Time,
 	return snap
 }
 
-// ── cache (mirrors releaseArtifactsCache: TTL + singleflight) ──
-
-type overviewCache struct {
-	mu       sync.Mutex
-	ttl      time.Duration
-	entries  map[string]overviewCacheEntry
-	inflight map[string]chan struct{}
-}
-
-type overviewCacheEntry struct {
-	snapshot OverviewSnapshot
-	expires  time.Time
-	err      error
-}
-
-func newOverviewCache(ttl time.Duration) *overviewCache {
-	return &overviewCache{ttl: ttl, entries: map[string]overviewCacheEntry{}, inflight: map[string]chan struct{}{}}
-}
-
-func (c *overviewCache) Get(ctx context.Context, key string, fetch func(context.Context) (OverviewSnapshot, error)) (OverviewSnapshot, error) {
-	now := time.Now()
-	c.mu.Lock()
-	if entry, ok := c.entries[key]; ok && now.Before(entry.expires) {
-		c.mu.Unlock()
-		return entry.snapshot, entry.err
-	}
-	if wait, ok := c.inflight[key]; ok {
-		c.mu.Unlock()
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return OverviewSnapshot{}, ctx.Err()
-		}
-		c.mu.Lock()
-		entry := c.entries[key]
-		c.mu.Unlock()
-		return entry.snapshot, entry.err
-	}
-	wait := make(chan struct{})
-	c.inflight[key] = wait
-	c.mu.Unlock()
-
-	snapshot, err := fetch(ctx)
-	c.mu.Lock()
-	expires := time.Now()
-	if err == nil {
-		expires = expires.Add(c.ttl)
-	}
-	c.entries[key] = overviewCacheEntry{snapshot: snapshot, expires: expires, err: err}
-	delete(c.inflight, key)
-	close(wait)
-	c.mu.Unlock()
-	return snapshot, err
-}
-
 // ── handler ──
 
 // mergeInstanceCounts folds unstamped (pre-migration) targets into the
@@ -379,7 +323,7 @@ func mergeInstanceCounts(counts []store.InstanceTargetCounts, defaultSlug string
 }
 
 // overviewHandler serves GET /api/overview?window=24h|48h|7d.
-func overviewHandler(db *sql.DB, defaultSlug string, cache *overviewCache) http.HandlerFunc {
+func overviewHandler(db *sql.DB, defaultSlug string, cache *ttlCache[OverviewSnapshot]) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		window := r.URL.Query().Get("window")
 		if window == "" {

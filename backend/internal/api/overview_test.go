@@ -188,7 +188,7 @@ func TestOverviewHandlerWindowValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	h := overviewHandler(db, "opensuse", newOverviewCache(time.Minute))
+	h := overviewHandler(db, "opensuse", newTTLCache[OverviewSnapshot](time.Minute))
 
 	for _, tc := range []struct {
 		q    string
@@ -225,7 +225,7 @@ func TestOverviewHandlerByInstance(t *testing.T) {
 		}
 	}
 
-	h := overviewHandler(db, "opensuse", newOverviewCache(time.Minute))
+	h := overviewHandler(db, "opensuse", newTTLCache[OverviewSnapshot](time.Minute))
 	w := httptest.NewRecorder()
 	h(w, httptest.NewRequest(http.MethodGet, "/api/overview", nil))
 	if w.Code != http.StatusOK {
@@ -255,7 +255,7 @@ func TestOverviewHandlerCaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	h := overviewHandler(db, "opensuse", newOverviewCache(time.Minute))
+	h := overviewHandler(db, "opensuse", newTTLCache[OverviewSnapshot](time.Minute))
 
 	w := httptest.NewRecorder()
 	h(w, httptest.NewRequest(http.MethodGet, "/api/overview", nil))
