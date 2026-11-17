@@ -101,3 +101,32 @@ func TestSchedulerSkipsAlreadyScanned(t *testing.T) {
 		t.Errorf("expected already-scanned package to be skipped, but got %d enqueued", len(enqueued))
 	}
 }
+
+func TestRunQueuesUnclassifiedAtStartup(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	putPackage(t, db, "isv:percona", "old", model.RollupPublished, "images")
+	putFindingScan(t, db, "isv:percona", "old", "images", "")
+
+	enqueued := make(chan cve.ScanRequest, 10)
+	scanner := cve.NewScanner(db, hub.New(), 0, cve.WithEnqueueFn(func(req cve.ScanRequest) {
+		enqueued <- req
+	}))
+	sched := cve.NewNightlyScheduler(db, scanner)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	go sched.Run(ctx)
+	<-ctx.Done()
+
+	if len(enqueued) != 1 {
+		t.Fatalf("enqueued %d requests, want 1", len(enqueued))
+	}
+	if req := <-enqueued; req.Package != "old" {
+		t.Errorf("unexpected package %q", req.Package)
+	}
+}

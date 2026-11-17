@@ -21,6 +21,9 @@ func NewNightlyScheduler(db *sql.DB, scanner *Scanner) *NightlyScheduler {
 
 func (n *NightlyScheduler) Run(ctx context.Context) {
 	n.enqueueUnscanned(ctx)
+	if _, err := n.scanner.RescanUnclassified(); err != nil {
+		slog.Warn("cve scheduler: rescan unclassified", "err", err)
+	}
 
 	timer := time.NewTimer(time.Until(nextNightlyRun()))
 	defer timer.Stop()
