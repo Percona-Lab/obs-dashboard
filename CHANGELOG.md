@@ -11,6 +11,17 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The CVE scanner now runs Grype after Trivy on every image and stores one merged list of findings. Trivy reports no OS vulnerabilities on RHEL 10 images, so ubi10 images used to show as clean; Grype finds them. When both scanners report the same CVE for the same package, it is listed once.
+- Each finding returned by the CVE endpoints has a `scanners` field listing which scanner reported it: `trivy`, `grype` or both. Findings stored before this version have no `scanners` field until the image is rescanned.
+
+### Changed
+
+- A scan now fails when either scanner fails, and the previous result is kept. Grype downloads its vulnerability database the first time it runs in a container, so the container needs outbound access to Grype's database host as well as Trivy's.
+- Each scan takes about twice as long, because each scanner pulls the image itself.
+- Existing images pick up Grype's findings at the next nightly rescan.
+
 ## [0.2.11] - 2026-11-17
 
 ### Added
