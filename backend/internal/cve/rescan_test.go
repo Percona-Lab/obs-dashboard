@@ -127,3 +127,75 @@ func TestRescanVulnerableSkipsPendingUntilScanned(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func putFindingScan(t *testing.T, db *sql.DB, project, name, repo, class string) {
+	t.Helper()
+	if err := store.UpsertCveScan(db, project, name, model.CveScan{
+		Repo: repo, Arch: "x86_64", ImageRef: "ref", ScannedAt: time.Now().UTC(), HighCount: 1,
+		Findings: []model.CveFinding{{ID: "CVE-1", PkgName: "x", Severity: "HIGH", Class: class}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRescanUnclassifiedQueuesOnlyUnclassified(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	putPackage(t, db, "p", "old", model.RollupPublished, "images")
+	putFindingScan(t, db, "p", "old", "images", "")
+	putPackage(t, db, "p", "new", model.RollupPublished, "images")
+	putFindingScan(t, db, "p", "new", "images", "os-pkgs")
+
+	got := make(chan cve.ScanRequest, 10)
+	s := cve.NewScanner(db, hub.New(), 0, cve.WithEnqueueFn(func(r cve.ScanRequest) { got <- r }))
+	n, err := s.RescanUnclassified()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("queued %d images, want 1", n)
+	}
+	select {
+	case req := <-got:
+		if req.Package != "old" {
+			t.Errorf("unexpected request %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no request enqueued")
+	}
+	select {
+	case req := <-got:
+		t.Errorf("unexpected extra request %+v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestRescanUnclassifiedNothingToDo(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	putPackage(t, db, "p", "new", model.RollupPublished, "images")
+	putFindingScan(t, db, "p", "new", "images", "os-pkgs")
+
+	got := make(chan cve.ScanRequest, 10)
+	s := cve.NewScanner(db, hub.New(), 0, cve.WithEnqueueFn(func(r cve.ScanRequest) { got <- r }))
+	n, err := s.RescanUnclassified()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("queued %d images, want 0", n)
+	}
+	select {
+	case req := <-got:
+		t.Errorf("unexpected request %+v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

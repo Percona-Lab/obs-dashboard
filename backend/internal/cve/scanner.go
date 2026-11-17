@@ -168,6 +168,22 @@ func (s *Scanner) RescanVulnerable() (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return s.rescanImages(imgs, "vulnerable")
+}
+
+// RescanUnclassified queues a fresh scan of every image whose stored
+// findings predate classification. A no-op once all have been rescanned.
+func (s *Scanner) RescanUnclassified() (int, error) {
+	imgs, err := store.QueryUnclassifiedImages(s.db)
+	if err != nil {
+		return 0, err
+	}
+	return s.rescanImages(imgs, "unclassified")
+}
+
+// rescanImages queues the published container images among imgs; what only
+// labels the log line.
+func (s *Scanner) rescanImages(imgs []store.VulnerableImage, what string) (int, error) {
 	repos := map[[2]string]map[string]bool{}
 	var order [][2]string
 	for _, img := range imgs {
@@ -225,7 +241,7 @@ func (s *Scanner) RescanVulnerable() (int, error) {
 			}
 		}
 	}()
-	slog.Info("cve: rescan of vulnerable images queued", "images", images, "packages", len(reqs))
+	slog.Info("cve: rescan queued", "what", what, "images", images, "packages", len(reqs))
 	return images, nil
 }
 
