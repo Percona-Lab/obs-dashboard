@@ -15,11 +15,25 @@ const overview = {
 
 class FakeES { onmessage = null; close() {} }
 
-function stubFetch(reportOk: boolean) {
+const golangRow = {
+  key: 'ours|golang', name: 'golang', kind: 'go_runtime', worst: 'CRITICAL', cves: 1,
+  fixes: [{ pkg: 'golang', installed: '1.22.1', fixed: '1.22.5' }],
+  entries: [{ id: 'CVE-2025-0002', pkg: 'golang', severity: 'CRITICAL', title: 't', seen_key: 'CVE-2025-0002|golang|' }],
+  images: [{ project: 'ppg:staging', package: 'p', repo: 'ubi9', arches: ['x86_64'] }],
+}
+const releasedImage = {
+  project: 'ppg:releases:18:containers', package: 'p', repo: 'ubi9', version: '1', staging_project: 'ppg:staging', staging_version: '2',
+  total: 1, fixed_in_staging: 0,
+  cves: [{ id: 'CVE-2025-0002', pkg: 'golang', installed: '1.22.1', fixed: '1.22.5', severity: 'CRITICAL', title: 't', status: 'open', staging_row_key: 'ours|golang' }],
+}
+
+function stubFetch(reportOk: boolean, withRows = false) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.startsWith('/api/cve/report')) {
       return reportOk
-        ? { ok: true, statusText: 'OK', json: async () => ({ generated_at: '', staging: { ours: [], base_os: [], unclassified: [], cves: 0, images: 0 }, released: [] }) }
+        ? { ok: true, statusText: 'OK', json: async () => withRows
+          ? ({ generated_at: '', staging: { ours: [golangRow], base_os: [], unclassified: [], cves: 1, images: 1 }, released: [releasedImage] })
+          : ({ generated_at: '', staging: { ours: [], base_os: [], unclassified: [], cves: 0, images: 0 }, released: [] }) }
         : { ok: false, statusText: 'Internal Server Error', json: async () => ({}) }
     }
     return { ok: true, statusText: 'OK', json: async () => overview }
@@ -65,5 +79,29 @@ describe('CvePanel', () => {
     await w.setProps({ view: 'images' })
     await flushPromises()
     expect(w.findComponent({ name: 'CveExposureTable' }).exists()).toBe(true)
+  })
+
+  it('jumps from a released CVE to its expanded staging row', async () => {
+    stubFetch(true, true)
+    const w = mount(CvePanel, { props: { view: 'released' } })
+    const { useCveReport } = await import('../../composables/useCveReport')
+    await useCveReport().refresh()
+    await flushPromises()
+    const rv = w.findComponent({ name: 'CveReleasedView' })
+    expect(rv.exists()).toBe(true)
+    rv.vm.$emit('open-staging-row', 'ours|golang')
+    expect(w.emitted('update:view')).toEqual([['staging']])
+    await w.setProps({ view: 'staging' })
+    await flushPromises()
+    expect(w.find('[data-testid="cve-row-ours|golang"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('never shows the released view while the report is missing', async () => {
+    stubFetch(false)
+    const w = mount(CvePanel, { props: { view: 'released' } })
+    const { useCveReport } = await import('../../composables/useCveReport')
+    await useCveReport().refresh()
+    await flushPromises()
+    expect(w.findComponent({ name: 'CveReleasedView' }).exists()).toBe(false)
   })
 })
