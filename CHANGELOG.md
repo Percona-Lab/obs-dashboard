@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-11-17
+
 ### Added
 
 - The CVE scanner now runs Grype after Trivy on every image and stores one merged list of findings. Trivy reports no OS vulnerabilities on RHEL 10 images, so ubi10 images used to show as clean; Grype finds them. When both scanners report the same CVE for the same package, it is listed once.
