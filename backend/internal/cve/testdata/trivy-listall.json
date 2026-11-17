@@ -1,0 +1,53 @@
+{
+  "SchemaVersion": 2,
+  "Results": [
+    {
+      "Target": "registry.example/pg (redhat 9.8)",
+      "Class": "os-pkgs",
+      "Type": "redhat",
+      "Packages": [
+        {"ID": "krb5-libs@1.21.1-10.el9_8.1.x86_64", "Name": "krb5-libs", "Version": "1.21.1", "SrcName": "krb5", "Maintainer": "Red Hat, Inc."},
+        {"ID": "percona-pgbouncer@1.24.0-1.el9.x86_64", "Name": "percona-pgbouncer", "Version": "1.24.0", "SrcName": "percona-pgbouncer", "Maintainer": "Percona, LLC"},
+        {"ID": "gosu@1.17-1.el9.x86_64", "Name": "gosu", "Version": "1.17", "SrcName": "gosu", "Maintainer": "obs://obs.pg.labs.percona.com/isv:percona:ppg:common:deps"},
+        {"ID": "python3.12-dns@2.9.0-1.el9.noarch", "Name": "python3.12-dns", "Version": "2.9.0", "SrcName": "python3.12-dns", "Maintainer": "Percona, LLC"},
+        {"ID": "percona-patroni@4.1.5-6.3.el9.x86_64", "Name": "percona-patroni", "Version": "4.1.5", "SrcName": "percona-patroni", "Maintainer": "Percona, LLC"}
+      ],
+      "Vulnerabilities": [
+        {"VulnerabilityID": "CVE-2026-0001", "PkgID": "krb5-libs@1.21.1-10.el9_8.1.x86_64", "PkgName": "krb5-libs", "InstalledVersion": "1.21.1-10.el9_8.1", "FixedVersion": "1.21.1-10.el9_9.2", "Severity": "HIGH", "Title": "krb5 flaw"},
+        {"VulnerabilityID": "CVE-2026-0002", "PkgID": "percona-pgbouncer@1.24.0-1.el9.x86_64", "PkgName": "percona-pgbouncer", "InstalledVersion": "1.24.0-1.el9", "FixedVersion": "1.24.1-1.el9", "Severity": "HIGH", "Title": "pgbouncer flaw"},
+        {"VulnerabilityID": "CVE-2026-0003", "PkgID": "ghost@1-1.x86_64", "PkgName": "ghost", "InstalledVersion": "1-1", "FixedVersion": "1-2", "Severity": "CRITICAL", "Title": "ghost flaw"}
+      ]
+    },
+    {
+      "Target": "usr/sbin/gosu",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Vulnerabilities": [
+        {"VulnerabilityID": "CVE-2026-0004", "PkgName": "stdlib", "InstalledVersion": "v1.26.3", "FixedVersion": "1.25.11, 1.26.4", "Severity": "CRITICAL", "Title": "go stdlib flaw"},
+        {"VulnerabilityID": "CVE-2026-0005", "PkgName": "golang.org/x/net", "InstalledVersion": "v0.54.0", "FixedVersion": "0.55.0", "Severity": "HIGH", "Title": "x/net flaw"}
+      ]
+    },
+    {
+      "Target": "usr/local/bin/mystery",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Vulnerabilities": [
+        {"VulnerabilityID": "CVE-2026-0006", "PkgName": "golang.org/x/net", "InstalledVersion": "v0.54.0", "FixedVersion": "0.55.0", "Severity": "HIGH", "Title": "x/net flaw"}
+      ]
+    },
+    {
+      "Target": "Python",
+      "Class": "lang-pkgs",
+      "Type": "python-pkg",
+      "Packages": [
+        {"Name": "dnspython", "Version": "2.9.0", "FilePath": "usr/lib/python3.12/site-packages/dnspython-2.9.0.dist-info/METADATA"},
+        {"Name": "patroni", "Version": "4.1.5", "FilePath": "usr/lib/python3.12/site-packages/patroni-4.1.5.dist-info/METADATA"},
+        {"Name": "requests", "Version": "2.0.0", "FilePath": "opt/app/requests-2.0.0.dist-info/METADATA"}
+      ],
+      "Vulnerabilities": [
+        {"VulnerabilityID": "CVE-2026-0007", "PkgName": "dnspython", "PkgPath": "usr/lib/python3.12/site-packages/dnspython-2.9.0.dist-info/METADATA", "InstalledVersion": "2.9.0", "FixedVersion": "2.9.2", "Severity": "HIGH", "Title": "dnspython flaw"},
+        {"VulnerabilityID": "CVE-2026-0008", "PkgName": "requests", "PkgPath": "opt/app/requests-2.0.0.dist-info/METADATA", "InstalledVersion": "2.0.0", "FixedVersion": "2.32.0", "Severity": "HIGH", "Title": "requests flaw"}
+      ]
+    }
+  ]
+}
