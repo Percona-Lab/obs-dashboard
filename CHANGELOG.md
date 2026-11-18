@@ -11,6 +11,10 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Released container images showed the version and tags of the previous release, for example `14.24-1` after `14.25-1` was released, in the "Released" view of the CVEs tab and wherever else the image's tags are shown. The tags were read once and never again. They are now re-read when the release project publishes, once a day, and at startup. When the tags change, the image is rescanned straight away instead of at the next nightly scan.
+
 ## [0.2.12] - 2026-11-17
 
 ### Added

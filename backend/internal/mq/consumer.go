@@ -178,8 +178,18 @@ func (c *Consumer) handle(ctx context.Context, msg amqp.Delivery) {
 	key := strings.TrimPrefix(msg.RoutingKey, c.prefix+".")
 	switch {
 	case key == "repo.published":
-		// Release projects: BinariesCheckTask handles publish detection; ignore MQ repo events.
+		// Release projects: BinariesCheckTask handles publish detection. A
+		// publish there can be a new release, which changes no build state,
+		// so re-read the tags of the project's containers.
 		if kind == obs.KindRelease {
+			containers, err := store.QueryContainersByProject(c.db, m.Project)
+			if err != nil {
+				slog.Warn("mq: get release containers for publish signal", "project", m.Project, "err", err)
+				return
+			}
+			for _, pkg := range containers {
+				c.ws.Signal(pkg)
+			}
 			return
 		}
 		finished, err := store.GetFinishedPackagesByProject(c.db, m.Project)

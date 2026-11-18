@@ -162,6 +162,55 @@ func TestRepoPublishedWakesOnlyMatchingRepo(t *testing.T) {
 	}
 }
 
+// repo.published on a release project can mean a new release, which changes
+// no build state: the project's containers must be woken to re-read their
+// tags, and only the containers.
+func TestRepoPublishedWakesReleaseContainers(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ws := workingset.New(4, 30*time.Second, 5*time.Minute, 4)
+	inst := obs.NewInstance(obs.InstanceInfo{Name: "openSUSE", Slug: "opensuse", Root: "isv:percona", WebURL: "https://build.opensuse.org", MQRoutingPrefix: "opensuse.obs"}, nil)
+	fleet := obs.NewFleet(inst)
+	c := NewConsumer(fleet.Default(), fleet, db, hubpkg.New(), ws)
+
+	now := time.Now().UTC()
+	yes, no := true, false
+	for _, pkg := range []*model.Package{
+		{Project: "ppg:releases:14:containers", Name: "img", IsRelease: true, IsContainer: &yes,
+			RollupState: model.RollupPublished, ContainerTags: []string{"14.24-1", "14"}, UpdatedAt: now},
+		{Project: "ppg:releases:14:containers", Name: "rpm", IsRelease: true, IsContainer: &no,
+			RollupState: model.RollupPublished, UpdatedAt: now},
+		{Project: "ppg:releases:15:containers", Name: "other", IsRelease: true, IsContainer: &yes,
+			RollupState: model.RollupPublished, ContainerTags: []string{"15.19-1", "15"}, UpdatedAt: now},
+	} {
+		if err := store.UpsertPackageState(db, pkg, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"project": "isv:percona:ppg:releases:14:containers", "repo": "ubi9",
+	})
+	c.handle(context.Background(), amqp.Delivery{RoutingKey: "opensuse.obs.repo.published", Body: body})
+
+	select {
+	case job := <-ws.Dispatch():
+		if got := job.Pkgs[0]; got.Name != "img" {
+			t.Fatalf("dispatched %q, want img", got.Name)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("repo.published did not wake the release container")
+	}
+	select {
+	case job := <-ws.Dispatch():
+		t.Fatalf("unexpected extra dispatch: %s", job.Pkgs[0].Name)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func twoInstanceFleet() (*obs.Fleet, *obs.Instance, *obs.Instance) {
 	x := obs.NewInstance(obs.InstanceInfo{Name: "openSUSE", Slug: "opensuse", Root: "isv:percona", WebURL: "https://build.opensuse.org", MQRoutingPrefix: "opensuse.obs"}, nil)
 	y := obs.NewInstance(obs.InstanceInfo{Name: "Percona", Slug: "percona", Root: "percona", WebURL: "https://obs.example.com", MQRoutingPrefix: "percona.obs"}, nil)

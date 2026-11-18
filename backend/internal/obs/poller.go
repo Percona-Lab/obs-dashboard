@@ -28,10 +28,20 @@ type Poller struct {
 	hub      *hubpkg.Hub
 	ws       *workingset.WorkingSet
 	gate     PollGate
+	// releaseTagsAt records, per release project, when its published
+	// containers were last queued for a tag refresh. In memory only, so a
+	// restart refreshes every release project on the first tick.
+	releaseTagsAt map[string]time.Time
 }
 
+// releaseTagsInterval is how often a published release container's tags are
+// re-read. A new release into the same project changes no build state, so
+// without this (and the MQ repo.published signal) the stored version would
+// stay at the first one seen.
+const releaseTagsInterval = 24 * time.Hour
+
 func NewPoller(client *Fleet, db *sql.DB, interval time.Duration, h *hubpkg.Hub, ws *workingset.WorkingSet, gate PollGate) *Poller {
-	return &Poller{client: client, db: db, interval: interval, hub: h, ws: ws, gate: gate}
+	return &Poller{client: client, db: db, interval: interval, hub: h, ws: ws, gate: gate, releaseTagsAt: map[string]time.Time{}}
 }
 
 // Run blocks until ctx is cancelled. It ticks immediately on first call
@@ -130,6 +140,11 @@ func (p *Poller) tick(ctx context.Context) {
 			}
 		}
 
+		refreshReleaseTags := kind == KindRelease && time.Since(p.releaseTagsAt[project]) >= releaseTagsInterval
+		if refreshReleaseTags {
+			p.releaseTagsAt[project] = time.Now()
+		}
+
 		tags := ProjectTags(project)
 		for pkgName, targets := range byPkg {
 			key := project + "/" + pkgName
@@ -177,8 +192,10 @@ func (p *Poller) tick(ctx context.Context) {
 						continue
 					}
 				}
-				// Add to working set only if there is work remaining.
-				containerNeedsTags := pkg.IsContainer != nil && *pkg.IsContainer && len(pkg.ContainerTags) == 0
+				// Add to working set only if there is work remaining, or the
+				// container's tags are due for their periodic re-read.
+				isContainer := pkg.IsContainer != nil && *pkg.IsContainer
+				containerNeedsTags := isContainer && (len(pkg.ContainerTags) == 0 || refreshReleaseTags)
 				if pkg.RollupState != model.RollupPublished || pkg.IsContainer == nil || containerNeedsTags {
 					p.ws.Add(pkg)
 				}

@@ -262,6 +262,17 @@ func QueryPublishedContainers(db *sql.DB) ([]*model.Package, error) {
 	return scanPackages(db, rows)
 }
 
+// QueryContainersByProject returns the confirmed container packages of one project.
+func QueryContainersByProject(db *sql.DB, project string) ([]*model.Package, error) {
+	rows, err := db.Query(`SELECT`+packageSelectCols+`
+		FROM packages WHERE project = ? AND is_container = 1`, project)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPackages(db, rows)
+}
+
 // GetPackage returns a single package by primary key, or nil if not found.
 func GetPackage(db *sql.DB, project, name string) (*model.Package, error) {
 	rows, err := db.Query(`SELECT`+packageSelectCols+`
