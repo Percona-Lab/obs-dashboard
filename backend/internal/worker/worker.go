@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -114,7 +115,7 @@ func (p *Pool) ProcessOnce(ctx context.Context, pkg *model.Package, env *obs.Env
 
 	// Snapshot rollup state before tasks run so we can detect the transition.
 	prevRollupState := pkg.RollupState
-	prevContainerTagCount := len(pkg.ContainerTags)
+	prevContainerTags := slices.Clone(pkg.ContainerTags)
 
 	// Snapshot target state before task chain.
 	// BuildReasonPackages is a slice field — deep copy to avoid aliasing.
@@ -170,14 +171,15 @@ func (p *Pool) ProcessOnce(ctx context.Context, pkg *model.Package, env *obs.Env
 
 	// Enqueue a CVE scan on two conditions:
 	// 1. Normal path: rollup just transitioned to published (dev containers, PR containers).
-	// 2. Release path: package was already published but container tags were just populated
-	//    for the first time (release containers arrive with tags missing; ContainerTagsTask
-	//    fills them in, which never triggers condition 1).
-	tagsJustPopulated := prevContainerTagCount == 0 && len(pkg.ContainerTags) > 0
+	// 2. Release path: package was already published but its container tags changed.
+	//    Release containers arrive with tags missing and ContainerTagsTask fills them in;
+	//    later a new release replaces them. Neither triggers condition 1, and the
+	//    stored scan would otherwise describe the previous image until the nightly rescan.
+	tagsChanged := !slices.Equal(prevContainerTags, pkg.ContainerTags)
 	if p.scanner != nil &&
 		pkg.IsContainer != nil && *pkg.IsContainer &&
 		pkg.RollupState == model.RollupPublished &&
-		(prevRollupState != model.RollupPublished || tagsJustPopulated) &&
+		(prevRollupState != model.RollupPublished || tagsChanged) &&
 		len(pkg.ContainerTags) > 0 {
 		p.scanner.Enqueue(cve.ScanRequest{
 			Project:    pkg.Project,

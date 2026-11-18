@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/percona/obs-dashboard/internal/cve"
 	hubpkg "github.com/percona/obs-dashboard/internal/hub"
 	"github.com/percona/obs-dashboard/internal/model"
 	"github.com/percona/obs-dashboard/internal/obs"
@@ -1152,5 +1153,48 @@ func TestProcessJobBatchFallsBackPerPackageOnFetchError(t *testing.T) {
 	}
 	if pkgA.RollupState != model.RollupSucceeded || pkgB.RollupState != model.RollupSucceeded {
 		t.Errorf("rollups = %s/%s, want succeeded/succeeded", pkgA.RollupState, pkgB.RollupState)
+	}
+}
+
+type setTagsTask struct{ tags []string }
+
+func (t setTagsTask) Run(_ context.Context, _ *obs.Fleet, pkg *model.Package, _ *obs.Env) error {
+	pkg.ContainerTags = t.tags
+	pkg.Version = t.tags[0]
+	return nil
+}
+
+// A published release container whose tags change (a new release landed)
+// must be rescanned: its stored scan describes the previous image. Unchanged
+// tags must not trigger a scan.
+func TestProcessOnceRescansReleaseContainerWhenTagsChange(t *testing.T) {
+	db := openDB(t)
+	ws := workingset.New(10, 30*time.Second, 5*time.Minute, 4)
+	var scans []cve.ScanRequest
+	scanner := cve.NewScanner(db, hubpkg.New(), 0, cve.WithEnqueueFn(func(r cve.ScanRequest) { scans = append(scans, r) }))
+
+	newPkg := func() *model.Package {
+		isContainer := true
+		return &model.Package{
+			Project: "ppg:releases:14:containers", Name: "img", IsRelease: true, IsContainer: &isContainer,
+			RollupState: model.RollupPublished, Version: "14.24-1", ContainerTags: []string{"14.24-1", "14"},
+			UpdatedAt: time.Now().UTC(),
+		}
+	}
+
+	same := worker.NewPool(1, nil, []worker.Task{setTagsTask{[]string{"14.24-1", "14"}}}, nil, db, hubpkg.New(), ws, scanner)
+	same.ProcessOnce(context.Background(), newPkg(), nil)
+	if len(scans) != 0 {
+		t.Fatalf("unchanged tags enqueued %d scans, want 0", len(scans))
+	}
+
+	changed := worker.NewPool(1, nil, []worker.Task{setTagsTask{[]string{"14.25-1", "14"}}}, nil, db, hubpkg.New(), ws, scanner)
+	changed.ProcessOnce(context.Background(), newPkg(), nil)
+	if len(scans) != 1 || scans[0].Package != "img" || scans[0].PrimaryTag != "14" {
+		t.Fatalf("changed tags enqueued %+v, want one scan of img:14", scans)
+	}
+	got, err := store.GetPackage(db, "ppg:releases:14:containers", "img")
+	if err != nil || got == nil || got.Version != "14.25-1" {
+		t.Fatalf("stored version = %+v (err=%v), want 14.25-1", got, err)
 	}
 }

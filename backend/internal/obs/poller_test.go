@@ -437,3 +437,72 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met within 2s")
 }
+
+// A published release container that already has tags must still be queued
+// for a tag re-read on the first tick after startup, and then not again
+// until releaseTagsInterval has passed: a new release into the same project
+// changes no build state, so nothing else would refresh its version.
+func TestPollerRefreshesReleaseContainerTags(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/search/project/id"):
+			w.Write([]byte(`<collection><project name="isv:percona:ppg:releases:14:containers"/></collection>`))
+		case r.URL.Path == "/build/isv:percona:ppg:releases:14:containers/_result":
+			w.Write([]byte(`<resultlist><result repository="ubi9" arch="x86_64" state="published"><status package="img" code="disabled"/><status package="rpm" code="disabled"/></result></resultlist>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	fleet := NewFleet(NewInstance(InstanceInfo{Slug: "opensuse", Root: "isv:percona"}, NewClient(srv.URL, "u", "p")))
+
+	now := time.Now().UTC()
+	yes, no := true, false
+	for _, pkg := range []*model.Package{
+		{Project: "ppg:releases:14:containers", Name: "img", IsRelease: true, IsContainer: &yes,
+			RollupState: model.RollupPublished, Version: "14.24-1", ContainerTags: []string{"14.24-1", "14"}, UpdatedAt: now},
+		{Project: "ppg:releases:14:containers", Name: "rpm", IsRelease: true, IsContainer: &no,
+			RollupState: model.RollupPublished, Version: "14.24-1", UpdatedAt: now},
+	} {
+		if err := store.UpsertPackageState(db, pkg, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ws := workingset.New(64, time.Minute, time.Minute, 4)
+	p := NewPoller(fleet, db, time.Minute, hubpkg.New(), ws, nil)
+
+	dispatched := func() []string {
+		var names []string
+		for {
+			select {
+			case job := <-ws.Dispatch():
+				for _, pkg := range job.Pkgs {
+					names = append(names, pkg.Name)
+					ws.Remove(pkg.Project + "/" + pkg.Name)
+				}
+			case <-time.After(100 * time.Millisecond):
+				return names
+			}
+		}
+	}
+
+	p.tick(context.Background())
+	if got := dispatched(); len(got) != 1 || got[0] != "img" {
+		t.Fatalf("first tick dispatched %v, want [img]", got)
+	}
+	p.tick(context.Background())
+	if got := dispatched(); len(got) != 0 {
+		t.Fatalf("second tick dispatched %v, want nothing", got)
+	}
+	p.releaseTagsAt["ppg:releases:14:containers"] = time.Now().Add(-releaseTagsInterval)
+	p.tick(context.Background())
+	if got := dispatched(); len(got) != 1 || got[0] != "img" {
+		t.Fatalf("tick after the interval dispatched %v, want [img]", got)
+	}
+}
