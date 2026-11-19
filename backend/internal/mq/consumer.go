@@ -105,11 +105,6 @@ func (c *Consumer) run(ctx context.Context) error {
 	}
 	defer ch.Close()
 
-	// Passive declare — exchange already exists on the broker.
-	if err := ch.ExchangeDeclarePassive(c.inst.MQExchange, "topic", true, false, false, false, nil); err != nil {
-		return fmt.Errorf("exchange declare: %w", err)
-	}
-
 	q, err := ch.QueueDeclare("", false, true, true, false, nil)
 	if err != nil {
 		return fmt.Errorf("queue declare: %w", err)

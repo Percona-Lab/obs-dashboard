@@ -11,6 +11,10 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- The dashboard stopped receiving build events from an OBS instance once its RabbitMQ broker was upgraded to a build with the fix for CVE-2026-57221, such as `rabbitmq-server-4.1.5-160000.3.1`. The log repeated `mq: disconnected, reconnecting` with `ACCESS_REFUSED - configure access to exchange` every 30 seconds, and the instance fell back to polling only. Those brokers require configure permission to check that an exchange exists, which a read-only consumer account does not have. The dashboard no longer makes that check. It binds its queue to the exchange directly, which needs only read permission, so no change to the broker account is needed. A missing exchange is still reported, by the bind.
+
 ## [0.2.13] - 2026-11-18
 
 ### Fixed
