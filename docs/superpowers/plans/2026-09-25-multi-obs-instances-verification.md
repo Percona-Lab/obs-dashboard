@@ -337,6 +337,17 @@ even passive" is corrected: that was never true — it was this broken
 broker build.** A passive declare of `obs.events` now succeeds with the
 read permission alone, no "configure" grant needed.
 
+**Update 2026-11-19: the paragraph above no longer holds.** The labs
+broker was upgraded to `rabbitmq-server-4.1.5-160000.3.1`, which
+includes the fix for CVE-2026-57221: passive queue and exchange
+declarations are now authorized, so a passive `exchange.declare` needs
+"configure" on the exchange. The consumer account keeps read only on
+`obs.events`, so the consumer no longer calls `ExchangeDeclarePassive`
+at all; it declares its queue and binds, and the bind fails with a 404
+if the exchange is missing. References in this document to
+`consumer.go:109` and to "no application-side workaround" describe the
+code as it was on 2026-09-26.
+
 Re-verification: built the frontend/backend fresh from the worktree,
 regenerated the scratch two-instance config (same vhost `obs`, exchange
 `obs.events`, routing prefix `percona.obs`, credentials only via env
