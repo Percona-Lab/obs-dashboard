@@ -29,6 +29,7 @@ var requiredAppPermissions = map[string]string{
 	"contents":      "write",
 	"pull_requests": "write",
 	"actions":       "write",
+	"checks":        "read",
 	"metadata":      "read",
 }
 
@@ -41,6 +42,8 @@ type fakeAppAPI struct {
 	appStatus      int               // non-zero: GET /app answers this status
 	instStatus     int               // non-zero: installation lookup answers this status
 	mintStatus     int               // non-zero: mint answers this status
+	repoStatus     int               // non-zero: GET /repos/percona/obs-packaging answers this status
+	repoAuth       string            // Authorization header of the latest repository request
 	expiresAt      string            // non-empty: literal expires_at in the mint response
 	permissions    map[string]string // nil: the full required set
 	mintDelay      time.Duration
@@ -57,6 +60,21 @@ func (f *fakeAppAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.requests++
 	f.mu.Unlock()
+
+	if r.Method == http.MethodGet && r.URL.Path == "/repos/percona/obs-packaging" {
+		// Personal-token path: not an App-JWT request.
+		f.mu.Lock()
+		st := f.repoStatus
+		f.repoAuth = r.Header.Get("Authorization")
+		f.mu.Unlock()
+		if st == 0 {
+			st = 200
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(st)
+		_, _ = w.Write([]byte(`{"full_name":"percona/obs-packaging"}`))
+		return
+	}
 
 	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	tok, err := jwt.ParseSigned(raw, []jose.SignatureAlgorithm{jose.RS256})
@@ -155,6 +173,24 @@ func (f *fakeAppAPI) installationID() int64 {
 		return f.instID
 	}
 	return 7654321
+}
+
+func (f *fakeAppAPI) set(fn func(f *fakeAppAPI)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(f)
+}
+
+func (f *fakeAppAPI) requestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests
+}
+
+func (f *fakeAppAPI) lastRepoAuth() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.repoAuth
 }
 
 func (f *fakeAppAPI) counts() (lookups, mints int) {
