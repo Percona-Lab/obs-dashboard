@@ -14,7 +14,7 @@ const { view, blockedRelease } = useUpgrades()
     data-testid="host-update-banner"
     class="flex flex-col gap-3 px-4 py-3 rounded-[10px] border-2 border-warn bg-warn-tint"
   >
-    <span class="text-[14px] font-bold text-text-primary">{{ blockedRelease.version }} needs a host update before it can be installed from the UI.</span>
+    <span class="text-[14px] font-bold text-text-primary">{{ blockedRelease.version }} needs host files {{ blockedRelease.requires_host }} or later before it can be installed from the UI.</span>
     <HostUpdateSteps :release="blockedRelease" :repo="view.repo" :host-files-version="view.host_files_version" />
   </div>
 </template>

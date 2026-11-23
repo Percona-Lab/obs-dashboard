@@ -9,7 +9,17 @@ A release that changes anything under `deploy/host/` must include a
 and any new `/etc/obs-dashboard/env` variable or `config.yaml` setting, with
 an example value. See `deploy/host/README.md`.
 
+The dashboard blocks a release with a `### Host changes` subsection until
+`OBS_DASHBOARD_HOST_FILES_VERSION` on the host is at least that release. Add
+the subsection only when the host must change before the upgrade. An optional
+new variable or setting belongs under `### Added` or `### Changed`.
+
 ## [Unreleased]
+
+### Changed
+
+- The host update notice says which host files version it needs and what clears it: `OBS_DASHBOARD_HOST_FILES_VERSION` at that version or later, and a restart. It used to list only the release's host changes, which could say that nothing needed to change.
+- A release that changes only `deploy/host/README.md` no longer needs a "Host changes" section, so it no longer blocks upgrades from the UI.
 
 ## [0.2.15] - 2026-11-23
 
@@ -24,7 +34,7 @@ an example value. See `deploy/host/README.md`.
 
 ### Host changes
 
-- No host file changed; only `deploy/host/README.md` did, so `OBS_DASHBOARD_HOST_FILES_VERSION` stays as it is. To switch to the GitHub App, add two lines to `/etc/obs-dashboard/env` and restart `obs-dashboard.service`. Set both or neither.
+- No host file changed, but this section still blocks the upgrade from the UI until `OBS_DASHBOARD_HOST_FILES_VERSION` is `v0.2.15` or later: set it and restart `obs-dashboard.service`. To switch to the GitHub App, add two lines to `/etc/obs-dashboard/env` and restart `obs-dashboard.service`. Set both or neither.
 
   ```sh
   RELEASE_GITHUB_APP_ID=123456

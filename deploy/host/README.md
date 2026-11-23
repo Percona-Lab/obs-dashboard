@@ -87,6 +87,11 @@ A release whose changelog has a **Host changes** section needs new host
 files before it can be applied from the UI. The dashboard shows a banner
 with these steps until `OBS_DASHBOARD_HOST_FILES_VERSION` is high enough.
 
+The dashboard only compares versions. Any release with a **Host changes**
+section is blocked until `OBS_DASHBOARD_HOST_FILES_VERSION` is at least that
+release, whatever the section says. Applying the listed changes without
+raising the version does not clear the banner.
+
 ```sh
 v=vX.Y.Z   # the release that introduced the host changes
 cd "$(mktemp -d)"
