@@ -11,6 +11,27 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The Release tab can act on GitHub as a GitHub App instead of with a personal access token. Set `RELEASE_GITHUB_APP_ID` and `RELEASE_GITHUB_APP_PRIVATE_KEY`, and the dashboard requests short-lived installation tokens limited to the release repository. Pull requests, labels, comments and merges then appear as `<app-slug>[bot]`. The App must be installed on the repository with these permissions: `contents` write, `pull_requests` write, `actions` write, `checks` read. The installation is found from `release.github_repo`; no installation ID is configured.
+- Settings → General has a "GitHub connection" card. It shows whether the Release tab uses the App or a token, whether the App is installed on the repository, the permissions it has been granted against the ones the Release tab needs, and when the current token expires. "Test connection" runs the check again. Nothing on the card is editable.
+
+### Changed
+
+- `RELEASE_GITHUB_TOKEN` is now the fallback. It is used only when neither App variable is set. When either App variable is set, the App is used, and a half-set pair or an unreadable key is not replaced by the token: the dashboard still starts, the Release tab reports that it could not refresh, and the "GitHub connection" card says which variable is wrong.
+
+### Host changes
+
+- No host file changed; only `deploy/host/README.md` did, so `OBS_DASHBOARD_HOST_FILES_VERSION` stays as it is. To switch to the GitHub App, add two lines to `/etc/obs-dashboard/env` and restart `obs-dashboard.service`. Set both or neither.
+
+  ```sh
+  RELEASE_GITHUB_APP_ID=123456
+  # output of: base64 -w0 app.private-key.pem
+  RELEASE_GITHUB_APP_PRIVATE_KEY=LS0tLS1CRUdJTi...
+  ```
+
+  `RELEASE_GITHUB_TOKEN` can stay in the file while switching over and be removed once the card shows "Connected".
+
 ## [0.2.14] - 2026-11-19
 
 ### Fixed
