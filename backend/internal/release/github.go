@@ -114,7 +114,7 @@ type GitHub interface {
 type Client struct {
 	APIBase string // default https://api.github.com
 	Repo    string // owner/name
-	Token   string
+	Tokens  TokenSource
 	HTTP    *http.Client
 
 	mu    sync.Mutex
@@ -177,7 +177,11 @@ func (c *Client) do(ctx context.Context, method, target string, body any, cache 
 		return nil, nil, fmt.Errorf("github %s: bad request", method)
 	}
 	safePath := req.URL.Path
-	req.Header.Set("Authorization", "Bearer "+c.Token)
+	token, err := c.Tokens.Token(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if body != nil {
@@ -222,6 +226,11 @@ func (c *Client) do(ctx context.Context, method, target string, body any, cache 
 		ae := &APIError{Method: method, Path: safePath, Status: resp.StatusCode}
 		if resp.StatusCode == http.StatusNotFound {
 			ae.kind = ErrNotFound
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			if inv, ok := c.Tokens.(interface{ Invalidate(string) }); ok {
+				inv.Invalidate(token)
+			}
 		}
 		return nil, nil, ae
 	}

@@ -20,7 +20,7 @@ func newGHClient(t *testing.T, h http.Handler) *Client {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &Client{APIBase: srv.URL, Repo: "percona/obs-packaging", Token: "ghp_SECRET", HTTP: srv.Client()}
+	return &Client{APIBase: srv.URL, Repo: "percona/obs-packaging", Tokens: StaticToken("ghp_SECRET"), HTTP: srv.Client()}
 }
 
 func TestGitHubAuthHeadersAndETag(t *testing.T) {
@@ -581,5 +581,45 @@ func TestClientRerun(t *testing.T) {
 	want := "POST /repos/percona/obs-packaging/actions/jobs/200/rerun,POST /repos/percona/obs-packaging/actions/runs/7/rerun-failed-jobs"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("requests = %v", got)
+	}
+}
+
+type countingSource struct {
+	tok         string
+	err         error
+	invalidated []string
+}
+
+func (s *countingSource) Token(context.Context) (string, error) { return s.tok, s.err }
+func (s *countingSource) Invalidate(tok string)                 { s.invalidated = append(s.invalidated, tok) }
+
+func TestClientTokenSourceError(t *testing.T) {
+	hits := 0
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	want := errors.New("no token")
+	c.Tokens = &countingSource{err: want}
+	if _, err := c.OpenPulls(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
+	}
+	if hits != 0 {
+		t.Fatalf("sent %d requests, want 0", hits)
+	}
+}
+
+func TestClientInvalidatesOn401(t *testing.T) {
+	hits := 0
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	src := &countingSource{tok: "ghs_OLD"}
+	c.Tokens = src
+	_, err := c.OpenPulls(context.Background())
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 401 {
+		t.Fatalf("err = %v, want APIError 401", err)
+	}
+	if hits != 1 || len(src.invalidated) != 1 || src.invalidated[0] != "ghs_OLD" {
+		t.Fatalf("hits=%d invalidated=%v", hits, src.invalidated)
 	}
 }
