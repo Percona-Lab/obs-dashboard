@@ -27,8 +27,10 @@ describe('HostUpdateBanner', () => {
     const b = w.find('[data-testid="host-update-banner"]')
     expect(b.exists()).toBe(true)
     expect(b.attributes('role')).toBe('alert')
-    expect(b.text()).toContain('v0.3.0 needs a host update before it can be installed from the UI.')
+    expect(b.text()).toContain('v0.3.0 needs host files v0.3.0 or later before it can be installed from the UI.')
     expect(b.text()).toContain('Add FOO=1')
+    expect(b.find('[data-testid="host-clear-condition"]').text()).toContain('OBS_DASHBOARD_HOST_FILES_VERSION')
+    expect(b.find('[data-testid="host-files-needed"]').text()).toBe('v0.3.0')
     expect(w.find('button').exists()).toBe(false)
   })
   it('is hidden when signed out', () => {

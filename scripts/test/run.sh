@@ -89,8 +89,18 @@ case_only_tests_changed() {
 $CL1"
   check v0.2.0
 }
+case_only_readme_changed() {
+  repo
+  commit_tag v0.1.0 "$CL1"
+  echo doc >"$R/deploy/host/README.md"
+  commit_tag v0.2.0 "## [0.2.0] - 2026-11-07
 
-for c in section first_tag_ok first_tag_needs_host_changes missing_section host_change_without_note host_change_with_note only_tests_changed; do
+- readme only
+$CL1"
+  check v0.2.0
+}
+
+for c in section first_tag_ok first_tag_needs_host_changes missing_section host_change_without_note host_change_with_note only_tests_changed only_readme_changed; do
   if "case_$c"; then pass=$((pass + 1)); echo "ok   $c"; else failures+=("$c"); echo "FAIL $c"; fi
   rm -rf "${R:-/nonexistent}"
 done
