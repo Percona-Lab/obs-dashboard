@@ -21,9 +21,14 @@ beforeEach(() => {
   resetAuthForTests()
   resetUpgradesForTests()
   useAuth().user.value = 'alice@percona.com'
-  handler = (url: string) => (url.startsWith('/api/upgrades')
-    ? new Response(JSON.stringify({ current: 'v0.1.0', host_files_version: '', repo: 'Percona-Lab/obs-dashboard', apply_enabled: false, in_flight: '', checked_at: null, releases: [] }), { status: 200 })
-    : new Response(JSON.stringify(listBody), { status: 200 }))
+  handler = (url: string) => {
+    if (url.startsWith('/api/release/github')) {
+      return new Response(JSON.stringify({ mode: 'off', repo: 'percona/obs-packaging', ok: false, error: '', failed_step: '', checked_at: '2026-11-23T00:00:00Z' }), { status: 200 })
+    }
+    return url.startsWith('/api/upgrades')
+      ? new Response(JSON.stringify({ current: 'v0.1.0', host_files_version: '', repo: 'Percona-Lab/obs-dashboard', apply_enabled: false, in_flight: '', checked_at: null, releases: [] }), { status: 200 })
+      : new Response(JSON.stringify(listBody), { status: 200 })
+  }
   fetchFn = vi.fn((url: string, init?: RequestInit) => Promise.resolve(handler(url, init)))
   vi.stubGlobal('fetch', fetchFn)
 })
@@ -120,6 +125,13 @@ describe('SettingsPanel sub-tabs', () => {
   beforeEach(() => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
+  })
+
+  it('shows the GitHub card on General only', async () => {
+    const w = await mounted()
+    expect(w.find('[data-testid="github-zone"]').exists()).toBe(true)
+    await w.find('[data-testid="settings-tab-log"]').trigger('click')
+    expect(w.find('[data-testid="github-zone"]').exists()).toBe(false)
   })
 
   it('opens on General', async () => {

@@ -118,3 +118,17 @@ export interface HistoryPage {
 
 export type ReleaseAction =
   | 'approve-changelog' | 'retry-sync' | 'approve-qa' | 'retry-qa' | 'skip-qa' | 'rerun-qa' | 'recut' | 'release' | 'retry-release' | 'abandon'
+
+// Mirrors release.ConnStatus (GET /api/release/github).
+export interface GitHubConnection {
+  mode: 'app' | 'token' | 'off'
+  repo: string
+  ok: boolean
+  error: string
+  failed_step: '' | 'config' | 'app' | 'installation' | 'token' | 'repository'
+  app?: { id: string; slug: string; name: string }
+  installation_id?: number
+  permissions?: { name: string; required: string; granted: string; ok: boolean }[]
+  token?: { minted_at: string | null; expires_at: string | null; last_error: string; last_error_at: string | null }
+  checked_at: string
+}
