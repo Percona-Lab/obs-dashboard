@@ -315,6 +315,9 @@ func (a *AppSource) mintLocked(ctx context.Context) (string, time.Time, error) {
 		Repositories []string `json:"repositories"`
 	}{[]string{name}}
 	if err := a.call(ctx, http.MethodPost, p, req, &r); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			a.installID = 0 // uninstalled or reinstalled: look it up again next time
+		}
 		return "", time.Time{}, err
 	}
 	exp, err := time.Parse(time.RFC3339, r.ExpiresAt)
