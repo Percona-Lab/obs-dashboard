@@ -376,7 +376,9 @@ A classic personal access token from the user's account with `repo` and
 `RELEASE_GITHUB_TOKEN`), plus `release.github_repo` (default
 `percona/obs-packaging`) **(user: classic token from their account)**. All
 GitHub actions therefore appear as the token owner; the real actor is
-recorded only inside the dashboard (§ 5.4) **(user)**.
+recorded only inside the dashboard (§ 5.4) **(user)**. Authenticating as a
+GitHub App instead of the token is described in
+`2026-11-23-github-app-release-auth-design.md`.
 
 Checked on 2026-11-11: the repository is public, `main` has no branch
 protection, rulesets or required checks, and only rebase merging is enabled.
