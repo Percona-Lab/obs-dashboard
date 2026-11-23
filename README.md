@@ -96,16 +96,39 @@ and QA, and approves the final release. Each step is an action on the
 of its own. The design is in
 [docs/superpowers/specs/2026-11-11-release-tab-design.md](docs/superpowers/specs/2026-11-11-release-tab-design.md).
 
-To enable it:
+To enable it, set one of these:
 
+- A GitHub App (preferred):
+  - `RELEASE_GITHUB_APP_ID` (or `release.github_app_id`): the App ID. Not secret.
+  - `RELEASE_GITHUB_APP_PRIVATE_KEY` (or `release.github_app_private_key`): the
+    App's private key PEM, base64-encoded on one line:
+    `base64 -w0 app.private-key.pem`. Set it in the environment, not in the
+    config file.
+
+  The App must be installed on the repository with these permissions:
+  `contents` write, `pull_requests` write, `actions` write, `checks` read and
+  `metadata` read. The installation ID is discovered from the repository; it is
+  not configured. GitHub actions appear as `<app-slug>[bot]`.
 - `RELEASE_GITHUB_TOKEN` (or `release.github_token`): a classic personal access
   token with the `repo` and `workflow` scopes. All GitHub actions appear as the
-  token's owner.
-- `RELEASE_GITHUB_REPO` (or `release.github_repo`): the repository to act on.
-  Default `percona/obs-packaging`.
+  token's owner. This remains as the fallback.
 
-Without a token the feature is off: the tab is hidden, the status endpoint
-reports it as disabled and the other release routes return 404.
+If both the App pair and the token are set, the App pair wins, so the token can
+stay in place during the switch and be removed afterwards. If only one of the
+two App values is set, or the key is not valid base64 or not an RSA private
+key, the dashboard still starts but the Release tab cannot reach GitHub. It
+does not fall back to the token, so the misconfiguration stays visible.
+
+`RELEASE_GITHUB_REPO` (or `release.github_repo`) sets the repository to act on.
+Default `percona/obs-packaging`.
+
+Settings → General has a read-only "GitHub connection" card. It shows which
+mode is in use, whether the App is installed on the repository and the
+permissions it was granted, and has a "Test connection" button.
+
+With neither the App pair nor a token the feature is off: the tab is hidden,
+the status endpoint reports it as disabled and the other release routes
+return 404.
 
 The tab requires the obs-packaging changes listed in section 6 of the design
 (cut workflow, sync gate, Jenkins annotation, run names, unit list file,

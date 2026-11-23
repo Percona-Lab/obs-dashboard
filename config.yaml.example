@@ -117,12 +117,22 @@ upgrades:
   check_interval: 1h
 
 # Release tab: triggers the obs-packaging release workflows on GitHub. The tab
-# is hidden and /api/release/* is disabled unless a token is set.
-# Keep the token out of this file: set RELEASE_GITHUB_TOKEN in the environment.
-# Use a classic personal access token from your own account with the `repo`
-# and `workflow` scopes.
+# is hidden and /api/release/* is disabled unless GitHub credentials are set.
+# Preferred: a GitHub App installed on the repository. Set both
+# RELEASE_GITHUB_APP_ID and RELEASE_GITHUB_APP_PRIVATE_KEY in the environment.
+# The key is `base64 -w0` of the App's private key PEM, on one line.
+# If the App pair is set it wins over RELEASE_GITHUB_TOKEN, which remains as
+# the fallback. A half-set or invalid pair does not fall back to the token.
+# Keep the key and the token out of this file: set them in the environment.
+# The token is a classic personal access token from your own account with the
+# `repo` and `workflow` scopes.
 release:
-  # Env: RELEASE_GITHUB_TOKEN. Leave empty to keep the feature off.
+  # Env: RELEASE_GITHUB_APP_ID. The App ID (or client ID). Not secret.
+  github_app_id: ""
+  # Env: RELEASE_GITHUB_APP_PRIVATE_KEY. Set it in the environment, not here.
+  github_app_private_key: ""
+  # Env: RELEASE_GITHUB_TOKEN. Fallback when no App is configured. Leave empty
+  # to keep the feature off.
   github_token: ""
   # owner/name. Env: RELEASE_GITHUB_REPO.
   github_repo: percona/obs-packaging

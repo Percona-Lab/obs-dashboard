@@ -1,6 +1,6 @@
 # Release tab: authenticate as a GitHub App
 
-Date: 2026-11-23. Status: design, not implemented.
+Date: 2026-11-23. Status: implemented.
 
 Decisions marked **(user)** were made by the user. Decisions marked
 **(my call)** were made while writing this document and have not been
@@ -142,7 +142,7 @@ The App source:
    seconds in the past (clock drift), `exp` 9 minutes ahead.
 2. On first use, finds the installation:
    `GET /repos/{owner}/{repo}/installation` with the JWT. The installation
-   ID is kept for the life of the process.
+   ID is kept until a token mint answers 404.
 3. Mints a token: `POST /app/installations/{id}/access_tokens` with the JWT,
    body `{"repositories": ["<repo name>"]}` so the token is scoped to the
    one repository even if the App is installed on more **(my call)**.
@@ -157,6 +157,8 @@ The App source:
    callers without another GitHub call, so one Release-tab refresh (on the
    order of a hundred requests) does not repeat the failing call each time.
    The connection check (§ 6.2) ignores this memory **(my call)**.
+8. A 404 on the mint drops the stored installation ID, so the next attempt
+   looks the installation up again (the App was uninstalled and reinstalled).
 
 The ETag cache in `Client` is left as it is: it is not cleared when a token
 is dropped or replaced **(my call)**.
