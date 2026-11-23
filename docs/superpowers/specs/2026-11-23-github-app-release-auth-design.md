@@ -152,7 +152,10 @@ The App source:
    dropped so the next request mints a fresh one. The failed request is not
    retried **(my call)**.
 6. A 404 on the installation lookup means "the App is not installed on this
-   repository"; the installation ID is not cached.
+   repository"; the installation ID is not cached. The error is an
+   `*APIError` with status 404 that deliberately does not match
+   `ErrNotFound`, because release code reads `ErrNotFound` as "the requested
+   object is absent".
 7. A failed lookup or mint is remembered for 30 seconds and returned to
    callers without another GitHub call, so one Release-tab refresh (on the
    order of a hundred requests) does not repeat the failing call each time.

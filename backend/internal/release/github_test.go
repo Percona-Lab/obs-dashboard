@@ -606,6 +606,22 @@ func TestClientTokenSourceError(t *testing.T) {
 	}
 }
 
+func TestClientTokenSource404IsNotNotFound(t *testing.T) {
+	hits := 0
+	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	c.Tokens = &countingSource{err: &APIError{Method: "GET", Path: "/repos/percona/obs-packaging/installation", Status: 404}}
+	err := c.RemoveLabel(context.Background(), 1, "obs-sync")
+	if err == nil {
+		t.Fatal("RemoveLabel returned nil for a call that was never sent")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("token-source 404 must not match ErrNotFound: %v", err)
+	}
+	if hits != 0 {
+		t.Fatalf("sent %d requests, want 0", hits)
+	}
+}
+
 func TestClientInvalidatesOn401(t *testing.T) {
 	hits := 0
 	c := newGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

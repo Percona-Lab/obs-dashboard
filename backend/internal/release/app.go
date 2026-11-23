@@ -202,11 +202,10 @@ func (a *AppSource) call(ctx context.Context, method, p string, body, out any) e
 		return fmt.Errorf("github %s %s: read failed", method, p)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		ae := &APIError{Method: method, Path: p, Status: resp.StatusCode}
-		if resp.StatusCode == http.StatusNotFound {
-			ae.kind = ErrNotFound
-		}
-		return ae
+		// Deliberately no ErrNotFound kind: release code reads ErrNotFound as
+		// "the requested object is absent", which a 404 from an App endpoint
+		// (App not installed) is not.
+		return &APIError{Method: method, Path: p, Status: resp.StatusCode}
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("github %s %s: bad response", method, p)
@@ -315,7 +314,8 @@ func (a *AppSource) mintLocked(ctx context.Context) (string, time.Time, error) {
 		Repositories []string `json:"repositories"`
 	}{[]string{name}}
 	if err := a.call(ctx, http.MethodPost, p, req, &r); err != nil {
-		if errors.Is(err, ErrNotFound) {
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
 			a.installID = 0 // uninstalled or reinstalled: look it up again next time
 		}
 		return "", time.Time{}, err
