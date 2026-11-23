@@ -11,6 +11,8 @@ an example value. See `deploy/host/README.md`.
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-11-23
+
 ### Added
 
 - The Release tab can act on GitHub as a GitHub App instead of with a personal access token. Set `RELEASE_GITHUB_APP_ID` and `RELEASE_GITHUB_APP_PRIVATE_KEY`, and the dashboard requests short-lived installation tokens limited to the release repository. Pull requests, labels, comments and merges then appear as `<app-slug>[bot]`. The App must be installed on the repository with these permissions: `contents` write, `pull_requests` write, `actions` write, `checks` read. The installation is found from `release.github_repo`; no installation ID is configured.
