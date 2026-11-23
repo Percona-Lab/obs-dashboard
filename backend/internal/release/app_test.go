@@ -324,8 +324,8 @@ func TestAppSourceNotInstalled(t *testing.T) {
 	if !errors.As(err, &ae) || ae.Method != "GET" || ae.Path != "/repos/percona/obs-packaging/installation" || ae.Status != 404 {
 		t.Fatalf("err = %#v", err)
 	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("err does not wrap ErrNotFound")
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("App-endpoint 404 must not match ErrNotFound")
 	}
 	api.instStatus = 0
 	*clock = clock.Add(31 * time.Second)
@@ -566,8 +566,11 @@ func TestAppSourceReinstalled(t *testing.T) {
 	src.Invalidate("ghs_1")
 	_, err := src.Token(ctx)
 	var ae *APIError
-	if !errors.As(err, &ae) || ae.Method != "POST" || ae.Path != "/app/installations/7654321/access_tokens" || ae.Status != 404 || !errors.Is(err, ErrNotFound) {
+	if !errors.As(err, &ae) || ae.Method != "POST" || ae.Path != "/app/installations/7654321/access_tokens" || ae.Status != 404 {
 		t.Fatalf("err = %#v", err)
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("App-endpoint 404 must not match ErrNotFound")
 	}
 	*clock = clock.Add(31 * time.Second)
 	if got, err := src.Token(ctx); err != nil || got != "ghs_2" {
