@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -84,6 +85,15 @@ func (s *stubRelease) Abandon(ctx context.Context, email, id, head string) error
 
 func releaseRouter(t *testing.T, rel ReleaseService) (http.Handler, string) {
 	t.Helper()
+	return releaseRouterGH(t, rel, nil)
+}
+
+type fakeChecker struct{ st release.ConnStatus }
+
+func (f fakeChecker) Check(context.Context) release.ConnStatus { return f.st }
+
+func releaseRouterGH(t *testing.T, rel ReleaseService, ghc GitHubChecker) (http.Handler, string) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "obsboard.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +105,7 @@ func releaseRouter(t *testing.T, rel ReleaseService) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	obsClient := obs.SingleFleet(obs.NewClient(stubOBSServer(t).URL, "user", "pass"), "isv:percona")
-	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, rel, nil), sid
+	return NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, rel, ghc, nil), sid
 }
 
 func relCall(h http.Handler, method, path, body, origin, sid string) *httptest.ResponseRecorder {
@@ -280,5 +290,48 @@ func TestReleaseRetryQARoute(t *testing.T) {
 	}
 	if rec = relCall(h, "POST", "/api/release/releases/r1/retry-qa", `{"head":"h"}`, "http://evil.test", sid); rec.Code != 403 {
 		t.Fatalf("bad origin: %d", rec.Code)
+	}
+}
+
+func TestReleaseGitHubRoute(t *testing.T) {
+	st := release.ConnStatus{Mode: "app", Repo: "percona/obs-packaging", OK: true,
+		App: &release.ConnApp{ID: "123456", Slug: "s", Name: "n"}, InstallationID: 7}
+	for name, rel := range map[string]ReleaseService{"nil": nil, "set": &stubRelease{}} {
+		h, sid := releaseRouterGH(t, rel, fakeChecker{st})
+		if rec := relCall(h, "GET", "/api/release/github", "", "", ""); rec.Code != 401 {
+			t.Fatalf("%s anon: %d", name, rec.Code)
+		}
+		rec := relCall(h, "GET", "/api/release/github", "", "", sid)
+		if rec.Code != 200 || rec.Header().Get("Content-Type") != "application/json" {
+			t.Fatalf("%s: %d %q", name, rec.Code, rec.Header().Get("Content-Type"))
+		}
+		var got struct {
+			Mode string `json:"mode"`
+			OK   bool   `json:"ok"`
+			App  struct {
+				ID string `json:"id"`
+			} `json:"app"`
+			InstallationID int64 `json:"installation_id"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode != "app" || !got.OK || got.App.ID != "123456" || got.InstallationID != 7 {
+			t.Errorf("%s body: %s", name, rec.Body.String())
+		}
+	}
+	h, sid := releaseRouterGH(t, nil, fakeChecker{release.ConnStatus{Mode: "off"}})
+	rec := relCall(h, "GET", "/api/release/github", "", "", sid)
+	if rec.Code != 200 {
+		t.Fatalf("off: %d", rec.Code)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"app", "permissions", "token"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("off body has %q", k)
+		}
 	}
 }

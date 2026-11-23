@@ -365,6 +365,8 @@ func Load() (*Config, error) {
 		{"upgrades.check_interval", "UPGRADES_CHECK_INTERVAL"},
 		{"release.github_token", "RELEASE_GITHUB_TOKEN"},
 		{"release.github_repo", "RELEASE_GITHUB_REPO"},
+		{"release.github_app_id", "RELEASE_GITHUB_APP_ID"},
+		{"release.github_app_private_key", "RELEASE_GITHUB_APP_PRIVATE_KEY"},
 	} {
 		_ = v.BindEnv(pair[0], pair[1])
 	}
@@ -521,14 +523,19 @@ func loadUpgrades(v *viper.Viper) (UpgradesConfig, error) {
 }
 
 // ReleaseConfig configures the Release tab, which drives the obs-packaging
-// release workflows on GitHub. The feature is off without a token.
+// release workflows on GitHub. The feature is off unless a token or a GitHub
+// App setting is present.
 type ReleaseConfig struct {
-	GitHubToken string // RELEASE_GITHUB_TOKEN: classic PAT with repo and workflow scopes
-	GitHubRepo  string // owner/name of the obs-packaging repository
+	GitHubToken         string // RELEASE_GITHUB_TOKEN: personal access token, the fallback
+	GitHubRepo          string // owner/name of the obs-packaging repository
+	GitHubAppID         string // RELEASE_GITHUB_APP_ID
+	GitHubAppPrivateKey string // RELEASE_GITHUB_APP_PRIVATE_KEY: base64 of the PEM
 }
 
 // Enabled reports whether the Release tab is configured.
-func (r ReleaseConfig) Enabled() bool { return r.GitHubToken != "" }
+func (r ReleaseConfig) Enabled() bool {
+	return r.GitHubToken != "" || r.GitHubAppID != "" || r.GitHubAppPrivateKey != ""
+}
 
 func loadRelease(v *viper.Viper) (ReleaseConfig, error) {
 	repo := strings.TrimSpace(v.GetString("release.github_repo"))
@@ -536,7 +543,9 @@ func loadRelease(v *viper.Viper) (ReleaseConfig, error) {
 		return ReleaseConfig{}, fmt.Errorf("release.github_repo must be owner/name, got %q", repo)
 	}
 	return ReleaseConfig{
-		GitHubToken: strings.TrimSpace(v.GetString("release.github_token")),
-		GitHubRepo:  repo,
+		GitHubToken:         strings.TrimSpace(v.GetString("release.github_token")),
+		GitHubRepo:          repo,
+		GitHubAppID:         strings.TrimSpace(v.GetString("release.github_app_id")),
+		GitHubAppPrivateKey: strings.TrimSpace(v.GetString("release.github_app_private_key")),
 	}, nil
 }
