@@ -216,7 +216,7 @@ func run() error {
 	var rel api.ReleaseService
 	if cfg.Release.Enabled() {
 		rel = release.NewService(release.Options{
-			GitHub:   &release.Client{Repo: cfg.Release.GitHubRepo, Token: cfg.Release.GitHubToken},
+			GitHub:   &release.Client{Repo: cfg.Release.GitHubRepo, Tokens: release.StaticToken(cfg.Release.GitHubToken)},
 			DB:       db,
 			Packages: packageSource{db},
 		})
