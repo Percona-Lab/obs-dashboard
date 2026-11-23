@@ -44,6 +44,8 @@ type fakeAppAPI struct {
 	expiresAt      string            // non-empty: literal expires_at in the mint response
 	permissions    map[string]string // nil: the full required set
 	mintDelay      time.Duration
+	instID         int64  // zero: 7654321; a mint for any other ID answers 404
+	lastMintPath   string // path of the latest mint request
 	lookups, mints int
 	requests       int // every request, whatever the outcome
 	issued         int // tokens handed out
@@ -97,8 +99,14 @@ func (f *fakeAppAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if perms == nil {
 			perms = requiredAppPermissions
 		}
-		reply(200, map[string]any{"id": 7654321, "permissions": perms})
-	case r.Method == http.MethodPost && r.URL.Path == "/app/installations/7654321/access_tokens":
+		reply(200, map[string]any{"id": f.installationID(), "permissions": perms})
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/app/installations/") && r.URL.Path != fmt.Sprintf("/app/installations/%d/access_tokens", f.installationID()):
+		f.mu.Lock()
+		f.mints++
+		f.lastMintPath = r.URL.Path
+		f.mu.Unlock()
+		fail(404)
+	case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/app/installations/%d/access_tokens", f.installationID()):
 		var body strings.Builder
 		buf := make([]byte, 512)
 		for {
@@ -111,6 +119,7 @@ func (f *fakeAppAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.mints++
 		f.lastMintBody = body.String()
+		f.lastMintPath = r.URL.Path
 		st, delay, exp := f.mintStatus, f.mintDelay, f.expiresAt
 		now := f.now
 		f.mu.Unlock()
@@ -137,6 +146,15 @@ func (f *fakeAppAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (f *fakeAppAPI) installationID() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.instID != 0 {
+		return f.instID
+	}
+	return 7654321
 }
 
 func (f *fakeAppAPI) counts() (lookups, mints int) {
@@ -497,5 +515,32 @@ func TestAppSourceNoSecretInErrors(t *testing.T) {
 	check("closed server", err)
 	if err != nil && strings.Contains(err.Error(), dead.URL) {
 		t.Errorf("closed server: error contains the URL")
+	}
+}
+
+func TestAppSourceReinstalled(t *testing.T) {
+	src, api, clock := newTestApp(t)
+	ctx := context.Background()
+	if got, err := src.Token(ctx); err != nil || got != "ghs_1" {
+		t.Fatalf("Token = %q, %v", got, err)
+	}
+	api.mu.Lock()
+	api.instID = 99
+	api.mu.Unlock()
+	src.Invalidate("ghs_1")
+	_, err := src.Token(ctx)
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Method != "POST" || ae.Path != "/app/installations/7654321/access_tokens" || ae.Status != 404 || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %#v", err)
+	}
+	*clock = clock.Add(31 * time.Second)
+	if got, err := src.Token(ctx); err != nil || got != "ghs_2" {
+		t.Fatalf("Token = %q, %v", got, err)
+	}
+	if l, _ := api.counts(); l != 2 {
+		t.Errorf("lookups=%d, want 2", l)
+	}
+	if api.lastMintPath != "/app/installations/99/access_tokens" {
+		t.Errorf("mint path = %s", api.lastMintPath)
 	}
 }
