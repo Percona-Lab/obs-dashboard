@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useSettingsUsers } from '../composables/useSettingsUsers'
 import ServiceZone from './ServiceZone.vue'
+import GitHubConnectionCard from './GitHubConnectionCard.vue'
 import ServerLogPanel from './ServerLogPanel.vue'
 
 const { user } = useAuth()
@@ -50,6 +51,7 @@ async function onRemove(email: string) {
     </div>
     <ServerLogPanel v-if="subTab === 'log'" />
     <ServiceZone v-if="subTab === 'general'" />
+    <GitHubConnectionCard v-if="subTab === 'general'" />
     <section v-if="subTab === 'general'" data-testid="access-zone" class="rounded-[14px] border border-border bg-bg-card p-5 flex flex-col gap-4">
       <header class="flex flex-col gap-1">
         <h2 class="m-0 text-[16px] font-bold text-text-primary">Access</h2>
