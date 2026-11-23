@@ -334,7 +334,10 @@ remains:
    hundred), well inside the installation's hourly limit. No code is planned
    for this.
 3. **The required-permission list** (§ 6.2) is derived from reading the
-   code, not from GitHub refusing calls.
+   code, not from GitHub refusing calls. On 2026-11-23 the deployment
+   tooling confirmed that the installed App grants every permission on the
+   list **(user)**; whether the list is sufficient for every release action
+   is still to be seen in a real release.
 
 Checked on 2026-11-23: none of the obs-packaging workflows branch on who the
 actor is (`github.actor` appears only as a registry login name in
