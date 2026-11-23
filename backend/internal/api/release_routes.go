@@ -18,6 +18,17 @@ import (
 // maxReleaseBody caps request bodies of the release routes.
 const maxReleaseBody = 256 << 10
 
+// GitHubChecker reports the state of the GitHub connection.
+type GitHubChecker interface {
+	Check(ctx context.Context) release.ConnStatus
+}
+
+func releaseGitHubHandler(ghc GitHubChecker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		relJSON(w, http.StatusOK, ghc.Check(r.Context()))
+	}
+}
+
 // ReleaseService is the part of *release.Service the handlers call.
 type ReleaseService interface {
 	Snapshot(ctx context.Context) (release.Snapshot, error)

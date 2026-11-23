@@ -65,7 +65,7 @@ func logsRouterDB(t *testing.T, src LogSource) (http.Handler, string, *sql.DB) {
 		t.Fatal(err)
 	}
 	obsClient := obs.SingleFleet(obs.NewClient(stubOBSServer(t).URL, "user", "pass"), "isv:percona")
-	r := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, nil, src)
+	r := NewRouter(db, hub.New(), obsClient, fakeStatter{}, new(atomic.Bool), time.Duration(0), fakePollState{s: "active"}, auth.NewService(db, opts), nil, nil, nil, nil, src)
 	return r, sid, db
 }
 

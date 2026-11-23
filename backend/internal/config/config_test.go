@@ -510,6 +510,43 @@ func TestReleaseConfigDefaultsAndEnv(t *testing.T) {
 	}
 }
 
+func TestReleaseConfigApp(t *testing.T) {
+	t.Setenv("OBS_USERNAME", "u")
+	t.Setenv("RELEASE_GITHUB_TOKEN", "")
+	t.Setenv("RELEASE_GITHUB_APP_ID", "")
+	t.Setenv("RELEASE_GITHUB_APP_PRIVATE_KEY", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Release.Enabled() {
+		t.Error("release must be disabled with nothing set")
+	}
+
+	t.Setenv("RELEASE_GITHUB_APP_ID", " 123456 ")
+	t.Setenv("RELEASE_GITHUB_APP_PRIVATE_KEY", " abc= ")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Release.GitHubAppID != "123456" || cfg.Release.GitHubAppPrivateKey != "abc=" || !cfg.Release.Enabled() {
+		t.Errorf("app config not loaded trimmed: id=%q enabled=%v", cfg.Release.GitHubAppID, cfg.Release.Enabled())
+	}
+
+	t.Setenv("RELEASE_GITHUB_APP_PRIVATE_KEY", "")
+	cfg, err = Load()
+	if err != nil || !cfg.Release.Enabled() {
+		t.Errorf("app id only: err=%v enabled=%v", err, cfg.Release.Enabled())
+	}
+
+	t.Setenv("RELEASE_GITHUB_APP_ID", "")
+	t.Setenv("RELEASE_GITHUB_APP_PRIVATE_KEY", "!!!")
+	cfg, err = Load()
+	if err != nil || !cfg.Release.Enabled() {
+		t.Errorf("garbage key only: err=%v enabled=%v", err, cfg.Release.Enabled())
+	}
+}
+
 func TestReleaseRepoValidation(t *testing.T) {
 	t.Setenv("OBS_USERNAME", "u")
 	t.Setenv("RELEASE_GITHUB_REPO", "not-a-repo")

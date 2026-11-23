@@ -213,17 +213,21 @@ func run() error {
 
 	// rel stays a nil interface when the feature is off (a nil *Service in
 	// the interface would look enabled).
+	conn := release.NewConnection(cfg.Release.GitHubRepo, cfg.Release.GitHubAppID, cfg.Release.GitHubAppPrivateKey, cfg.Release.GitHubToken)
 	var rel api.ReleaseService
-	if cfg.Release.Enabled() {
+	if conn.Mode() != release.ModeOff {
 		rel = release.NewService(release.Options{
-			GitHub:   &release.Client{Repo: cfg.Release.GitHubRepo, Tokens: release.StaticToken(cfg.Release.GitHubToken)},
+			GitHub:   &release.Client{Repo: cfg.Release.GitHubRepo, Tokens: conn.TokenSource()},
 			DB:       db,
 			Packages: packageSource{db},
 		})
-		slog.Info("release: enabled", "repo", cfg.Release.GitHubRepo)
+		slog.Info("release: enabled", "repo", cfg.Release.GitHubRepo, "mode", conn.Mode())
+		if err := conn.ConfigErr(); err != nil {
+			slog.Warn("release: GitHub App misconfigured", "error", err)
+		}
 	}
 
-	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg, scanner, rel, logs)
+	router := api.NewRouter(db, h, fleet, ws, telemetryEnabled, cfg.Telemetry.Interval, gate, authSvc, upg, scanner, rel, conn, logs)
 
 	go fleet.RunHealthWatch(ctx, 15*time.Second, func(slug string, health obs.Health) {
 		h.Notify(hub.InstanceHealth(map[string]any{"slug": slug, "health": health}))
