@@ -379,31 +379,61 @@ func TestPackageTypeTaskRPM(t *testing.T) {
 	}
 }
 
-func TestPackageTypeTaskSkipsWhenAlreadySet(t *testing.T) {
+// typeTaskCalls runs PackageTypeTask against a source that has a Dockerfile
+// and reports whether OBS was asked.
+func typeTaskCalls(t *testing.T, pkg *model.Package) bool {
+	t.Helper()
 	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		fmt.Fprint(w, `<sourceinfo><filename>Dockerfile</filename></sourceinfo>`)
 	}))
 	defer ts.Close()
-
 	c := obs.SingleFleet(obs.NewClient(ts.URL, "u", "p"), "isv:percona")
-	pkg := &model.Package{
-		Project:     "isv:percona:ppg:17",
-		Name:        "percona-pg_tde",
-		IsContainer: boolPtr(false),
-		UpdatedAt:   time.Now().UTC(),
-	}
-
-	task := obs.PackageTypeTask{}
-	if err := task.Run(context.Background(), c, pkg, nil); err != nil {
+	if err := (obs.PackageTypeTask{}).Run(context.Background(), c, pkg, nil); err != nil {
 		t.Fatal(err)
 	}
-	if called {
-		t.Error("PackageTypeTask should not call OBS when IsContainer is already set")
+	return called
+}
+
+func TestPackageTypeTaskSkipsConfirmedContainer(t *testing.T) {
+	pkg := &model.Package{Project: "isv:percona:ppg:17:containers", Name: "img", IsContainer: boolPtr(true)}
+	if typeTaskCalls(t, pkg) {
+		t.Error("a confirmed container must not be re-detected")
+	}
+}
+
+func TestPackageTypeTaskSkipsNonContainerWhileTargetsStable(t *testing.T) {
+	pkg := &model.Package{Project: "isv:percona:ppg:17", Name: "percona-pg_tde",
+		IsContainer: boolPtr(false), TargetsStable: true}
+	if typeTaskCalls(t, pkg) {
+		t.Error("a non-container with stable targets must not be re-detected")
 	}
 	if pkg.IsContainer == nil || *pkg.IsContainer {
 		t.Error("IsContainer should remain false when task is skipped")
+	}
+}
+
+// A package first seen before its Dockerfile existed was recorded as a
+// non-container; a later build must correct that.
+func TestPackageTypeTaskRechecksNonContainerOnNewBuild(t *testing.T) {
+	pkg := &model.Package{Project: "isv:percona:ppg:staging:common:upgrade:containers", Name: "img",
+		IsContainer: boolPtr(false), TargetsStable: false}
+	if !typeTaskCalls(t, pkg) {
+		t.Fatal("a non-container whose targets changed must be re-detected")
+	}
+	if pkg.IsContainer == nil || !*pkg.IsContainer {
+		t.Error("expected IsContainer=true after re-detection")
+	}
+}
+
+// The release chain never marks targets stable, so a negative result there
+// stays cached rather than being refetched every pass.
+func TestPackageTypeTaskSkipsReleaseNonContainer(t *testing.T) {
+	pkg := &model.Package{Project: "isv:percona:ppg:releases:17", Name: "percona-pg_tde",
+		IsContainer: boolPtr(false), IsRelease: true}
+	if typeTaskCalls(t, pkg) {
+		t.Error("a release non-container must not be re-detected")
 	}
 }
 

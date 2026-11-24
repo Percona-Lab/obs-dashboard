@@ -166,8 +166,8 @@ func run() error {
 	fleet.SeedOwners(storedPkgs)
 
 	devTasks := []worker.Task{
-		obs.PackageTypeTask{},
 		obs.BuildStateTask{},
+		obs.PackageTypeTask{}, // after BuildStateTask: re-checks on TargetsStable
 		obs.PublishStateTask{},
 		obs.VersionTask{},
 		obs.ContainerTagsTask{},
