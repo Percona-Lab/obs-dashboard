@@ -21,6 +21,10 @@ new variable or setting belongs under `### Added` or `### Changed`.
 - The host update notice says which host files version it needs and what clears it: `OBS_DASHBOARD_HOST_FILES_VERSION` at that version or later, and a restart. It used to list only the release's host changes, which could say that nothing needed to change.
 - A release that changes only `deploy/host/README.md` no longer needs a "Host changes" section, so it no longer blocks upgrades from the UI.
 
+### Fixed
+
+- A package recorded as "not a container" is checked again whenever a new build of it lands. A package first seen before its `Dockerfile` existed stayed a non-container for good: it got no image tags and no CVE scan, so its released image showed "No staging image to compare" in the CVEs tab. A package already stuck this way is corrected on its next build.
+
 ## [0.2.15] - 2026-11-23
 
 ### Added

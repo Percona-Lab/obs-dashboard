@@ -309,10 +309,17 @@ func (t BuildReasonTask) Run(ctx context.Context, client *Fleet, pkg *model.Pack
 // PackageTypeTask detects whether a package produces a container image by
 // inspecting its source files. Sets pkg.IsContainer accordingly.
 // Errors are logged and treated as non-fatal to preserve the existing value.
+//
+// A positive result is final. A negative one is re-checked whenever the
+// package's targets changed (a new build landed): a package first seen
+// before its Dockerfile was committed, or while its source answered 404,
+// would otherwise stay a non-container forever and never be scanned. It must
+// run after BuildStateTask, which sets TargetsStable for the pass. The
+// release chain has no BuildStateTask, so negatives stay cached there.
 type PackageTypeTask struct{}
 
 func (t PackageTypeTask) Run(ctx context.Context, client *Fleet, pkg *model.Package, env *Env) error {
-	if pkg.IsContainer != nil {
+	if pkg.IsContainer != nil && (*pkg.IsContainer || pkg.TargetsStable || pkg.IsRelease) {
 		return nil
 	}
 	isContainer, err := client.PackageIsContainer(ctx, pkg.Project, pkg.Name)
