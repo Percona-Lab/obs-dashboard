@@ -16,6 +16,8 @@ new variable or setting belongs under `### Added` or `### Changed`.
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-11-24
+
 ### Changed
 
 - The host update notice says which host files version it needs and what clears it: `OBS_DASHBOARD_HOST_FILES_VERSION` at that version or later, and a restart. It used to list only the release's host changes, which could say that nothing needed to change.
