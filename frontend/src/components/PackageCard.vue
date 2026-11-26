@@ -11,7 +11,7 @@ import InstanceBadge from './InstanceBadge.vue'
 
 const { instanceFor, packageInstances } = useInstances()
 
-const props = defineProps<{ pkg: Package; spotlightStates?: string[]; activeInstances?: string[] }>()
+const props = defineProps<{ pkg: Package; activeInstances?: string[] }>()
 
 // A tarball package: lives in a :tarballs subproject and builds against an
 // ssl* repo (structural detection, matching the Artifacts Tarballs sub-tab).
@@ -201,9 +201,6 @@ function targetDimmed(t: Target): boolean {
 function targetAge(t: Target): string | null {
   return elapsedTime(t.started_at)
 }
-
-const isSpotlit = computed(() => !!props.spotlightStates?.length && props.spotlightStates.includes(props.pkg.rollup_state))
-const isDimmed = computed(() => !!props.spotlightStates?.length && !props.spotlightStates.includes(props.pkg.rollup_state))
 </script>
 
 <template>
@@ -213,9 +210,6 @@ const isDimmed = computed(() => !!props.spotlightStates?.length && !props.spotli
       background: 'var(--bg-card)',
       border: '1px solid var(--border)',
       borderLeft: `4px solid ${rollupColor}`,
-      opacity: isDimmed ? 0.2 : 1,
-      boxShadow: isSpotlit ? `0 0 0 2px ${rollupColor}, 0 6px 20px rgba(0,0,0,0.12)` : 'none',
-      transition: 'opacity 0.2s, box-shadow 0.2s',
     }"
   >
     <!-- Row 1: state pill + duration + OBS link -->

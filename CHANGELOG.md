@@ -16,6 +16,10 @@ new variable or setting belongs under `### Added` or `### Changed`.
 
 ## [Unreleased]
 
+### Changed
+
+- The state pills in the health header filter the package board: with a state selected, only the cards of packages in that state are shown, and with none selected all cards are shown. Unselected cards used to stay on the board, greyed out. The list of built packages is hidden while a state is selected.
+
 ## [0.2.16] - 2026-11-24
 
 ### Changed

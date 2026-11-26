@@ -18,7 +18,12 @@ const visiblePackages = computed(() => {
   return props.packages.filter(p => p.name.toLowerCase().includes(q))
 })
 
-const failingPackages = computed(() => visiblePackages.value.filter(isFailing))
+// The header's state pills filter the cards: with states selected only
+// packages in those states are shown; with none selected, all are.
+const matchesState = (p: Package) =>
+  props.spotlightStates.length === 0 || props.spotlightStates.includes(p.rollup_state)
+
+const failingPackages = computed(() => visiblePackages.value.filter(p => isFailing(p) && matchesState(p)))
 const okPackages = computed(() => visiblePackages.value.filter(p => !isFailing(p)))
 const attentionCount = computed(() => failingPackages.value.length)
 const totalFailing = computed(() => props.packages.filter(isFailing).length)
@@ -47,7 +52,6 @@ const totalFailing = computed(() => props.packages.filter(isFailing).length)
         v-for="pkg in failingPackages"
         :key="`${pkg.project}/${pkg.name}`"
         :pkg="pkg"
-        :spotlight-states="spotlightStates"
         :active-instances="activeInstances"
       />
     </div>
@@ -58,7 +62,7 @@ const totalFailing = computed(() => props.packages.filter(isFailing).length)
     </div>
 
     <!-- All green state (only when not searching) -->
-    <div v-if="!query && failingPackages.length === 0 && packages.length > 0" class="bg-ok-tint border border-ok rounded-[12px] p-7 flex flex-col items-center gap-2 text-center">
+    <div v-if="!query && totalFailing === 0 && packages.length > 0" class="bg-ok-tint border border-ok rounded-[12px] p-7 flex flex-col items-center gap-2 text-center">
       <span class="text-[26px] text-ok font-extrabold">✓</span>
       <span class="text-[15px] font-bold text-text-primary">All packages green</span>
     </div>
@@ -70,9 +74,8 @@ const totalFailing = computed(() => props.packages.filter(isFailing).length)
 
     <!-- Green strip -->
     <GreenStrip
-      v-if="okPackages.length > 0"
+      v-if="okPackages.length > 0 && spotlightStates.length === 0"
       :packages="okPackages"
-      :style="spotlightStates.length > 0 ? 'opacity: 0.2; transition: opacity 0.2s' : 'transition: opacity 0.2s'"
     />
   </div>
 </template>
