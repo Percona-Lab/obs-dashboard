@@ -364,3 +364,110 @@ func TestFreezeStates_NoSource(t *testing.T) {
 		}
 	}
 }
+
+func TestSetFreeze_ConflictCarriesMessage(t *testing.T) {
+	fx, _ := freezeFixture(t)
+	fx.freezeRun(1, FreezeRunName(ActionFreeze, []string{unitA}), "in_progress", "", fx.clock.now())
+	err := fx.svc.SetFreeze(context.Background(), "maria@x", ActionUnfreeze, []string{unitA})
+	var ce *ConflictError
+	if !errors.As(err, &ce) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	if want := "unit " + unitA + " has a freeze in progress"; ce.Msg != want || err.Error() != want {
+		t.Fatalf("msg = %q, error = %q, want %q", ce.Msg, err.Error(), want)
+	}
+}
+
+func TestFreezeInstances_CancelledReadNotCached(t *testing.T) {
+	fx, src := freezeFixture(t)
+	src.set(unitA, InstanceFreeze{"labs", "frozen"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	fx.svc.freezeInstances(ctx, []string{unitA})
+	fx.svc.freezeInstances(context.Background(), []string{unitA})
+	if n := src.callsOf(unitA); n != 2 {
+		t.Fatalf("reads = %d, want 2 (the cancelled read must not be cached)", n)
+	}
+	fx.svc.freezeInstances(context.Background(), []string{unitA})
+	if n := src.callsOf(unitA); n != 2 {
+		t.Fatalf("reads = %d, want 2 (a good read is cached)", n)
+	}
+}
+
+// slowFreeze blocks each read and records the peak number in flight.
+type slowFreeze struct {
+	mu        sync.Mutex
+	cur, peak int
+	calls     map[string]int
+}
+
+func (f *slowFreeze) UnitFreeze(_ context.Context, unit string) []InstanceFreeze {
+	f.mu.Lock()
+	f.cur++
+	if f.cur > f.peak {
+		f.peak = f.cur
+	}
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[unit]++
+	f.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	f.mu.Lock()
+	f.cur--
+	f.mu.Unlock()
+	return []InstanceFreeze{{"labs", "unfrozen"}}
+}
+
+func TestFreezeInstances_ConcurrencyCapped(t *testing.T) {
+	fx := newFixture(t)
+	src := &slowFreeze{}
+	svc := NewService(Options{GitHub: fx.gh, DB: fx.db, Packages: fakeSource{}, Freeze: src, Now: fx.clock.now})
+	var units []string
+	for i := 0; i < 12; i++ {
+		units = append(units, "u"+string(rune('a'+i)))
+	}
+	svc.freezeInstances(context.Background(), units)
+	if src.peak > 4 || src.peak < 1 {
+		t.Fatalf("peak concurrency = %d, want 1..4", src.peak)
+	}
+}
+
+func TestFreezeInstances_ConcurrentCallersReadOnce(t *testing.T) {
+	fx := newFixture(t)
+	src := &slowFreeze{}
+	svc := NewService(Options{GitHub: fx.gh, DB: fx.db, Packages: fakeSource{}, Freeze: src, Now: fx.clock.now})
+	units := []string{"ua", "ub", "uc", "ud", "ue", "uf"}
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			svc.freezeInstances(context.Background(), units)
+		}()
+	}
+	wg.Wait()
+	for _, u := range units {
+		if src.calls[u] != 1 {
+			t.Fatalf("%s read %d times, want 1", u, src.calls[u])
+		}
+	}
+}
+
+// jobsFailGitHub fails Jobs only.
+type jobsFailGitHub struct{ *fakeGitHub }
+
+func (g jobsFailGitHub) Jobs(context.Context, int64) ([]Job, error) {
+	return nil, errors.New("boom")
+}
+
+func TestFreezeStates_JobsErrorKeepsFailure(t *testing.T) {
+	fx, src := freezeFixture(t)
+	_ = src
+	fx.freezeRun(5, FreezeRunName(ActionFreeze, []string{unitA}), "completed", "failure", fx.clock.now().Add(-time.Hour))
+	fx.svc = NewService(Options{GitHub: jobsFailGitHub{fx.gh}, DB: fx.db, Packages: fakeSource{}, Freeze: &fakeFreeze{}, Now: fx.clock.now})
+	got := freezeOf(t, fx.svc, unitA)
+	if got.Failed == nil || got.Failed.Action != ActionFreeze || got.Failed.Instances == nil || len(got.Failed.Instances) != 0 {
+		t.Fatalf("failed = %+v", got.Failed)
+	}
+}

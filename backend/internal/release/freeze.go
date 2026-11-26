@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ const (
 	auditUnfreeze = ActionUnfreeze
 	// freezeMetaTTL is how long the OBS freeze state of a unit is reused.
 	freezeMetaTTL = time.Minute
+	// freezeReadConcurrency is how many units are read from OBS at once.
+	freezeReadConcurrency = 4
 )
 
 // freezeMetaEntry is one OBS read of a unit.
@@ -29,6 +32,13 @@ type freezeDispatch struct {
 	action, email string
 	at            time.Time // to the second, as GitHub's run times are
 }
+
+// ConflictError is a refusal with a message fit to show to the user. It is an
+// ErrConflict.
+type ConflictError struct{ Msg string }
+
+func (e *ConflictError) Error() string { return e.Msg }
+func (e *ConflictError) Unwrap() error { return ErrConflict }
 
 // InstanceFreeze is the freeze state of a unit on one OBS instance.
 type InstanceFreeze struct {
@@ -164,8 +174,10 @@ func (s *Service) FreezeStates(ctx context.Context) ([]UnitFreeze, error) {
 				action, _, _ := ParseFreezeRunName(run.Name)
 				js, seen := jobs[run.ID]
 				if !seen {
-					if js, err = s.gh.Jobs(ctx, run.ID); err != nil {
-						return nil, err
+					var jerr error
+					if js, jerr = s.gh.Jobs(ctx, run.ID); jerr != nil {
+						slog.Warn("release: freeze run jobs", "run", run.ID, "err", jerr)
+						js = nil
 					}
 					jobs[run.ID] = js
 				}
@@ -287,12 +299,39 @@ func (s *Service) freezeInstances(ctx context.Context, units []string) map[strin
 	}
 	s.freezeMu.Unlock()
 
+	if len(missing) == 0 {
+		return out
+	}
+
+	// One refresh at a time: a caller that waited takes what the running one
+	// stored.
+	s.freezeRefreshMu.Lock()
+	defer s.freezeRefreshMu.Unlock()
+	s.freezeMu.Lock()
+	gen = s.freezeGen
+	still := missing[:0:0]
+	for _, u := range missing {
+		if e, ok := s.freezeMeta[u]; ok && s.now().Sub(e.at) < freezeMetaTTL {
+			out[u] = e.inst
+		} else {
+			still = append(still, u)
+		}
+	}
+	s.freezeMu.Unlock()
+	missing = still
+	if len(missing) == 0 {
+		return out
+	}
+
 	read := make([][]InstanceFreeze, len(missing))
+	sem := make(chan struct{}, freezeReadConcurrency)
 	var wg sync.WaitGroup
 	for i, u := range missing {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
+			defer func() { <-sem }()
 			inst := s.freezeSrc.UnitFreeze(ctx, u)
 			if inst == nil {
 				inst = []InstanceFreeze{}
@@ -307,9 +346,11 @@ func (s *Service) freezeInstances(ctx context.Context, units []string) map[strin
 	if s.freezeMeta == nil {
 		s.freezeMeta = map[string]freezeMetaEntry{}
 	}
+	// A read made under a cancelled context may be partial: do not keep it.
+	keep := gen == s.freezeGen && ctx.Err() == nil
 	for i, u := range missing {
 		out[u] = read[i]
-		if gen == s.freezeGen {
+		if keep {
 			s.freezeMeta[u] = freezeMetaEntry{at: s.now(), inst: read[i]}
 		}
 	}
@@ -344,7 +385,7 @@ func (s *Service) SetFreeze(ctx context.Context, email, action string, units []s
 		case seen[u]:
 			return fmt.Errorf("%w: unit %s is chosen twice", ErrBadRequest, u)
 		case st.Pending != nil:
-			return fmt.Errorf("%w: unit %s has a %s in progress", ErrConflict, u, st.Pending.Action)
+			return &ConflictError{Msg: fmt.Sprintf("unit %s has a %s in progress", u, st.Pending.Action)}
 		}
 		seen[u] = true
 	}

@@ -293,9 +293,21 @@ func TestReleaseFreezePost(t *testing.T) {
 }
 
 func TestReleaseFreezePostConflict(t *testing.T) {
-	h, sid := releaseRouter(t, &stubRelease{err: fmt.Errorf("%w: run in flight", release.ErrConflict)})
-	if rec := relCall(h, "POST", "/api/release/freeze", `{"action":"unfreeze","units":["a"]}`, dashOrigin, sid); rec.Code != 409 {
+	h, sid := releaseRouter(t, &stubRelease{err: &release.ConflictError{Msg: "unit a has a freeze in progress"}})
+	rec := relCall(h, "POST", "/api/release/freeze", `{"action":"unfreeze","units":["a"]}`, dashOrigin, sid)
+	if rec.Code != 409 {
 		t.Fatalf("%d", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "unit a has a freeze in progress" {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestReleasePlainConflictStaysConflict(t *testing.T) {
+	h, sid := releaseRouter(t, &stubRelease{err: fmt.Errorf("%w: run in flight", release.ErrConflict)})
+	rec := relCall(h, "POST", "/api/release/freeze", `{"action":"unfreeze","units":["a"]}`, dashOrigin, sid)
+	if rec.Code != 409 || strings.TrimSpace(rec.Body.String()) != "conflict" {
+		t.Fatalf("%d %q", rec.Code, rec.Body.String())
 	}
 }
 

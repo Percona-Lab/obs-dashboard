@@ -60,7 +60,12 @@ func relFail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, release.ErrNotFound):
 		http.Error(w, "not found", http.StatusNotFound)
 	case errors.Is(err, release.ErrConflict):
-		http.Error(w, "conflict", http.StatusConflict)
+		msg := "conflict"
+		var ce *release.ConflictError
+		if errors.As(err, &ce) {
+			msg = ce.Msg
+		}
+		http.Error(w, msg, http.StatusConflict)
 	case errors.Is(err, release.ErrBadRequest):
 		msg := strings.TrimPrefix(err.Error(), release.ErrBadRequest.Error()+": ")
 		http.Error(w, msg, http.StatusBadRequest)

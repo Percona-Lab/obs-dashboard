@@ -334,12 +334,15 @@ type Service struct {
 
 	// Freeze state. freezeMu is never held across a GitHub, OBS or database
 	// call.
-	freezeMu      sync.Mutex
-	freezeSrc     FreezeSource
-	freezeGen     uint64                     // bumped when freezeMeta is dropped
-	freezeMeta    map[string]freezeMetaEntry // unit -> OBS read
-	freezePending map[string]freezeDispatch  // unit -> dispatch GitHub does not list yet
-	freezeRunning map[int64]bool             // runs seen in progress on the previous read
+	freezeMu  sync.Mutex
+	freezeSrc FreezeSource
+	// freezeRefreshMu serializes OBS refreshes; it is held across OBS calls,
+	// freezeMu is not.
+	freezeRefreshMu sync.Mutex
+	freezeGen       uint64                     // bumped when freezeMeta is dropped
+	freezeMeta      map[string]freezeMetaEntry // unit -> OBS read
+	freezePending   map[string]freezeDispatch  // unit -> dispatch GitHub does not list yet
+	freezeRunning   map[int64]bool             // runs seen in progress on the previous read
 }
 
 type refreshCall struct {
