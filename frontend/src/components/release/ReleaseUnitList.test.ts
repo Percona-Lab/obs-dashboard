@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ReleaseUnitList from './ReleaseUnitList.vue'
-import type { UnitRow } from '../../types/release'
+import type { UnitRow, UnitFreeze } from '../../types/release'
 
 const row = (o: Partial<UnitRow>): UnitRow => ({
   unit: 'ppg:staging:18', members: ['ppg:staging:18'], release_project: '', release_dir: '',
@@ -18,8 +18,13 @@ const units: UnitRow[] = [
   row({ unit: 'ppg:staging:common:tools', members: [] }),
 ]
 
-const mk = (p: Partial<{ units: UnitRow[]; busy: boolean; error: string }> = {}) =>
-  mount(ReleaseUnitList, { props: { units, busy: false, error: '', ...p } })
+const mk = (p: Partial<{ units: UnitRow[]; busy: boolean; error: string; freeze: UnitFreeze[] | null }> = {}) =>
+  mount(ReleaseUnitList, { props: { units, busy: false, error: '', freeze: null, ...p } })
+
+const fz = (o: Partial<UnitFreeze>): UnitFreeze => ({
+  unit: 'ppg:staging:18', state: 'unfrozen', instances: [], frozen_by: '', frozen_at: null,
+  pending: null, failed: null, ...o,
+})
 
 describe('ReleaseUnitList', () => {
   it('disables blocked units and shows the reason', () => {
@@ -90,5 +95,48 @@ describe('ReleaseUnitList', () => {
     await btn.trigger('click')
     expect(w.emitted('open-builds')).toHaveLength(1)
     expect(w.find('[data-unit="ppg:staging:17"] [data-testid="open-builds"]').exists()).toBe(false)
+  })
+
+  it('shows the frozen pill', () => {
+    const w = mk({ freeze: [fz({ unit: 'ppg:staging:18', state: 'frozen' })] })
+    const pill = w.get('[data-unit="ppg:staging:18"] [data-testid="freeze-pill"]')
+    expect(pill.text()).toBe('❄ frozen')
+  })
+
+  it('warns about a ticked unit that is not frozen', async () => {
+    const w = mk({ freeze: [fz({ unit: 'ppg:staging:18', state: 'unfrozen' })] })
+    expect(w.find('[data-testid="not-frozen"]').exists()).toBe(false)
+    await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+    expect(w.get('[data-testid="not-frozen"]').text()).toBe(
+      'Not frozen: a dependency update can start rebuilds while this release is prepared.')
+    await w.get('[data-unit="ppg:staging:18"] input').setValue(false)
+    expect(w.find('[data-testid="not-frozen"]').exists()).toBe(false)
+  })
+
+  it('names the frozen instances of a partly frozen unit', async () => {
+    const w = mk({ freeze: [fz({ unit: 'ppg:staging:18', state: 'partial', instances: [
+      { instance: 'labs', state: 'frozen' }, { instance: 'obs', state: 'unfrozen' },
+    ] })] })
+    expect(w.get('[data-unit="ppg:staging:18"] [data-testid="freeze-pill"]').text()).toBe('❄ partly frozen')
+    await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+    expect(w.get('[data-testid="not-frozen"]').text()).toBe(
+      'Frozen on labs only: a dependency update can start rebuilds while this release is prepared.')
+  })
+
+  it('shows no strip for a ticked frozen unit', async () => {
+    const w = mk({ freeze: [fz({ unit: 'ppg:staging:18', state: 'frozen' })] })
+    await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+    expect(w.find('[data-testid="not-frozen"]').exists()).toBe(false)
+  })
+
+  it('shows no pill or strip while freeze is null', async () => {
+    const w = mk()
+    await w.get('[data-unit="ppg:staging:18"] input').setValue(true)
+    expect(w.find('[data-testid="freeze-pill"]').exists()).toBe(false)
+    expect(w.find('[data-testid="not-frozen"]').exists()).toBe(false)
+    const cut = w.get('[data-testid="cut-release"]')
+    expect(cut.attributes('disabled')).toBeUndefined()
+    await cut.trigger('click')
+    expect(w.emitted('cut')![0]).toEqual([['ppg:staging:18']])
   })
 })
