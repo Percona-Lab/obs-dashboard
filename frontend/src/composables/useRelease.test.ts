@@ -335,6 +335,21 @@ describe('useRelease', () => {
     expect(freezeError.value).not.toBe('')
   })
 
+  it('an older freeze GET that resolves late does not overwrite a newer one', async () => {
+    const gets: ((r: Response) => void)[] = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { gets.push(res) })))
+    const { freeze, freezeError, loadFreeze } = useRelease()
+    const older = loadFreeze()
+    const newer = loadFreeze()
+    gets[1](json({ units: [{ ...freezeBody.units[0], state: 'unfrozen' }] }))
+    await newer
+    expect((freeze.value ?? [])[0]?.state).toBe('unfrozen')
+    gets[0](json({ units: [{ ...freezeBody.units[0], state: 'frozen' }] }))
+    await older
+    expect((freeze.value ?? [])[0]?.state).toBe('unfrozen')
+    expect(freezeError.value).toBe('')
+  })
+
   it('a 401 on the freeze GET does not set an error', async () => {
     const { freezeError, loadFreeze } = useRelease()
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('no', { status: 401 }))))

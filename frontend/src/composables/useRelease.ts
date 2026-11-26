@@ -77,16 +77,24 @@ function doRefresh(fresh = false): Promise<void> {
   return p
 }
 
+let freezeSeq = 0
+
 // loadFreeze reads the freeze state. A failure keeps the last good state.
+// Only the most recently started load writes the state, so a slow older
+// response cannot overwrite a newer one.
 async function loadFreeze(): Promise<void> {
+  const mine = ++freezeSeq
   try {
     const res = await fetch(`${BASE}/freeze`)
     if (res.status === 401) { handleUnauthorized(); return }
-    if (!res.ok) { freezeError.value = await errorText(res); return }
-    freeze.value = ((await res.json()) as { units?: UnitFreeze[] }).units ?? []
-    freezeError.value = ''
+    if (!res.ok) { if (mine === freezeSeq) freezeError.value = await errorText(res); return }
+    const units = ((await res.json()) as { units?: UnitFreeze[] }).units ?? []
+    if (mine === freezeSeq) {
+      freeze.value = units
+      freezeError.value = ''
+    }
   } catch {
-    freezeError.value = 'Network error'
+    if (mine === freezeSeq) freezeError.value = 'Network error'
   }
 }
 
@@ -256,6 +264,7 @@ export function resetReleaseForTests(): void {
   pending.value = ''
   notice.value = ''
   busy.value = false
+  freezeSeq = 0
   freeze.value = null
   freezeError.value = ''
 }
