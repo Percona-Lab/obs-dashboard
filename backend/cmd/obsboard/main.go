@@ -220,6 +220,7 @@ func run() error {
 			GitHub:   &release.Client{Repo: cfg.Release.GitHubRepo, Tokens: conn.TokenSource()},
 			DB:       db,
 			Packages: packageSource{db},
+			Freeze:   freezeSource{fleet},
 		})
 		slog.Info("release: enabled", "repo", cfg.Release.GitHubRepo, "mode", conn.Mode())
 		if err := conn.ConfigErr(); err != nil {
@@ -280,4 +281,16 @@ type packageSource struct{ db *sql.DB }
 
 func (p packageSource) Packages(prefix string) ([]*model.Package, error) {
 	return store.QueryPackages(p.db, prefix)
+}
+
+// freezeSource adapts the fleet to release.FreezeSource.
+type freezeSource struct{ f *obs.Fleet }
+
+func (s freezeSource) UnitFreeze(ctx context.Context, unit string) []release.InstanceFreeze {
+	in := s.f.UnitFreeze(ctx, unit)
+	out := make([]release.InstanceFreeze, 0, len(in))
+	for _, x := range in {
+		out = append(out, release.InstanceFreeze{Instance: x.Instance, State: x.State})
+	}
+	return out
 }

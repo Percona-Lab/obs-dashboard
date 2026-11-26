@@ -26,6 +26,11 @@ type stubRelease struct {
 	more  bool  // returned by History
 	email string
 	calls []string
+
+	freeze       []release.UnitFreeze // returned by FreezeStates
+	freezeEmail  string               // email SetFreeze was called with
+	freezeAction string               // action SetFreeze was called with
+	freezeUnits  []string             // units SetFreeze was called with
 }
 
 func (s *stubRelease) rec(name string, ctx context.Context) error {
@@ -82,6 +87,13 @@ func (s *stubRelease) RetryRelease(ctx context.Context, email, id string) error 
 func (s *stubRelease) Abandon(ctx context.Context, email, id, head string) error {
 	return s.rec("abandon", ctx)
 }
+func (s *stubRelease) FreezeStates(ctx context.Context) ([]release.UnitFreeze, error) {
+	return s.freeze, s.rec("freeze-states", ctx)
+}
+func (s *stubRelease) SetFreeze(ctx context.Context, email, action string, units []string) error {
+	s.freezeEmail, s.freezeAction, s.freezeUnits = email, action, units
+	return s.rec("set-freeze", ctx)
+}
 
 func releaseRouter(t *testing.T, rel ReleaseService) (http.Handler, string) {
 	t.Helper()
@@ -132,6 +144,8 @@ var releaseRoutes = []struct{ method, path, body string }{
 	{"POST", "/api/release/releases/r1/retry-qa", `{"head":"h"}`},
 	{"POST", "/api/release/releases/r1/skip-qa", `{"head":"h"}`},
 	{"POST", "/api/release/releases/r1/rerun-qa", `{"head":"h","lane":"x"}`},
+	{"GET", "/api/release/freeze", ""},
+	{"POST", "/api/release/freeze", `{"action":"freeze","units":["a"]}`},
 }
 
 func TestReleaseRoutesRequireUser(t *testing.T) {
@@ -209,6 +223,7 @@ func TestReleaseGitHubFailureIs502NoDetails(t *testing.T) {
 		{"GET", "/api/release/units", ""},
 		{"GET", "/api/release/releases", ""},
 		{"GET", "/api/release/history", ""},
+		{"GET", "/api/release/freeze", ""},
 	} {
 		rec := relCall(h, rt.m, rt.p, rt.b, dashOrigin, sid)
 		if rec.Code != 502 || strings.Contains(rec.Body.String(), "secret") || strings.TrimSpace(rec.Body.String()) != "github request failed" {
@@ -221,6 +236,80 @@ func TestReleaseUnknownAction404(t *testing.T) {
 	h, sid := releaseRouter(t, &stubRelease{})
 	if rec := relCall(h, "POST", "/api/release/releases/r1/explode", `{}`, dashOrigin, sid); rec.Code != 404 {
 		t.Fatalf("%d", rec.Code)
+	}
+}
+
+func TestReleaseFreezeGet(t *testing.T) {
+	st := &stubRelease{freeze: []release.UnitFreeze{{
+		Unit:      "ppg:staging:18",
+		State:     "frozen",
+		Instances: []release.InstanceFreeze{{Instance: "obs-a", State: "frozen"}},
+	}}}
+	h, sid := releaseRouter(t, st)
+	rec := relCall(h, "GET", "/api/release/freeze", "", "", sid)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Units []struct {
+			Unit      string            `json:"unit"`
+			State     string            `json:"state"`
+			Instances []json.RawMessage `json:"instances"`
+			Pending   json.RawMessage   `json:"pending"`
+		} `json:"units"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Units) != 1 || got.Units[0].Unit != "ppg:staging:18" || got.Units[0].State != "frozen" {
+		t.Fatalf("body: %s", rec.Body)
+	}
+	if got.Units[0].Instances == nil || len(got.Units[0].Instances) != 1 {
+		t.Errorf("instances: %s", rec.Body)
+	}
+	if string(got.Units[0].Pending) != "null" {
+		t.Errorf("pending: %s", got.Units[0].Pending)
+	}
+}
+
+func TestReleaseFreezeGetEmpty(t *testing.T) {
+	h, sid := releaseRouter(t, &stubRelease{})
+	rec := relCall(h, "GET", "/api/release/freeze", "", "", sid)
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"units":[]}` {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestReleaseFreezePost(t *testing.T) {
+	st := &stubRelease{}
+	h, sid := releaseRouter(t, st)
+	rec := relCall(h, "POST", "/api/release/freeze", `{"action":"freeze","units":["ppg:staging:18"]}`, dashOrigin, sid)
+	if rec.Code != 204 || rec.Body.Len() != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if st.freezeAction != "freeze" || len(st.freezeUnits) != 1 || st.freezeUnits[0] != "ppg:staging:18" || st.freezeEmail != "alice@percona.com" {
+		t.Fatalf("service got action=%q units=%v email=%q", st.freezeAction, st.freezeUnits, st.freezeEmail)
+	}
+}
+
+func TestReleaseFreezePostConflict(t *testing.T) {
+	h, sid := releaseRouter(t, &stubRelease{err: fmt.Errorf("%w: run in flight", release.ErrConflict)})
+	if rec := relCall(h, "POST", "/api/release/freeze", `{"action":"unfreeze","units":["a"]}`, dashOrigin, sid); rec.Code != 409 {
+		t.Fatalf("%d", rec.Code)
+	}
+}
+
+func TestReleaseFreezeNeedsOrigin(t *testing.T) {
+	st := &stubRelease{}
+	h, sid := releaseRouter(t, st)
+	if rec := relCall(h, "POST", "/api/release/freeze", `{"action":"freeze","units":["a"]}`, "", sid); rec.Code != 403 {
+		t.Fatalf("no origin: %d", rec.Code)
+	}
+	if rec := relCall(h, "POST", "/api/release/freeze", `{"action":"freeze","units":["a"]}`, "http://evil.test", sid); rec.Code != 403 {
+		t.Fatalf("bad origin: %d", rec.Code)
+	}
+	if len(st.calls) != 0 {
+		t.Fatalf("service called: %v", st.calls)
 	}
 }
 
