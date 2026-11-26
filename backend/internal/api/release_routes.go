@@ -47,6 +47,8 @@ type ReleaseService interface {
 	Release(ctx context.Context, email, id, head string, confirmFailed bool) error
 	RetryRelease(ctx context.Context, email, id string) error
 	Abandon(ctx context.Context, email, id, head string) error
+	FreezeStates(ctx context.Context) ([]release.UnitFreeze, error)
+	SetFreeze(ctx context.Context, email, action string, units []string) error
 }
 
 const githubFailed = "github request failed"
@@ -58,7 +60,12 @@ func relFail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, release.ErrNotFound):
 		http.Error(w, "not found", http.StatusNotFound)
 	case errors.Is(err, release.ErrConflict):
-		http.Error(w, "conflict", http.StatusConflict)
+		msg := "conflict"
+		var ce *release.ConflictError
+		if errors.As(err, &ce) {
+			msg = ce.Msg
+		}
+		http.Error(w, msg, http.StatusConflict)
 	case errors.Is(err, release.ErrBadRequest):
 		msg := strings.TrimPrefix(err.Error(), release.ErrBadRequest.Error()+": ")
 		http.Error(w, msg, http.StatusBadRequest)
@@ -140,6 +147,32 @@ func mountRelease(r chi.Router, svc ReleaseService, origin func(http.Handler) ht
 			rows = []release.HistoryRow{}
 		}
 		relJSON(w, http.StatusOK, map[string]any{"rows": rows, "more": more})
+	})
+
+	r.Get("/api/release/freeze", func(w http.ResponseWriter, req *http.Request) {
+		units, err := svc.FreezeStates(req.Context())
+		if err != nil {
+			relFail(w, req, err)
+			return
+		}
+		if units == nil {
+			units = []release.UnitFreeze{}
+		}
+		relJSON(w, http.StatusOK, map[string]any{"units": units})
+	})
+	r.With(origin).Post("/api/release/freeze", func(w http.ResponseWriter, req *http.Request) {
+		var body struct {
+			Action string   `json:"action"`
+			Units  []string `json:"units"`
+		}
+		if !relBody(w, req, &body) {
+			return
+		}
+		if err := svc.SetFreeze(req.Context(), relEmail(req), body.Action, body.Units); err != nil {
+			relFail(w, req, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	r.With(origin).Post("/api/release/releases", func(w http.ResponseWriter, req *http.Request) {

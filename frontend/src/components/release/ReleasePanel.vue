@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRelease } from '../../composables/useRelease'
 import ReleaseUnitList from './ReleaseUnitList.vue'
+import FreezeCard from './FreezeCard.vue'
 import ReleaseHistory from './ReleaseHistory.vue'
 import ReleaseWizard from './ReleaseWizard.vue'
 import ReleaseLoading from './ReleaseLoading.vue'
@@ -10,7 +11,7 @@ import { safeHref } from '../../lib/safeHref'
 import type { ReleaseState, ReleaseStep } from '../../types/release'
 
 const emit = defineEmits<{ 'open-builds': [] }>()
-const { snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy, loadUnits, cut } = useRelease()
+const { snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy, loadUnits, cut, freeze, freezeError, loadFreeze, setFreeze } = useRelease()
 
 const selectedId = ref<string | null>(null)
 
@@ -45,7 +46,7 @@ watch(releases, (rs) => {
 // Refresh the unit list when the set of release ids changes.
 const idKey = computed(() => releases.value.map((r) => r.id).sort().join(','))
 watch(idKey, () => { void loadUnits() })
-onMounted(() => { void loadUnits() })
+onMounted(() => { void loadUnits(); void loadFreeze() })
 
 async function onCut(ticked: string[]) {
   const id = await cut(ticked)
@@ -60,6 +61,12 @@ async function onCut(ticked: string[]) {
     leaveStarting()
     notice.value = 'The cut did not start. Check the Actions tab of the repository.'
   }, START_WAIT_MS)
+}
+
+// The picker stays open when the freeze fails, so the selection is kept.
+const pickerOpen = ref(false)
+async function onFreeze(units: string[]) {
+  if (await setFreeze('freeze', units)) pickerOpen.value = false
 }
 
 // blocked.release_id may be a unit release id rather than the release's own id.
@@ -114,10 +121,12 @@ const when = (iso: string | null) => {
         </ul>
       </section>
 
+      <FreezeCard v-model:picker-open="pickerOpen" :freeze="freeze" :units="units" :error="freezeError" :busy="busy" @freeze="onFreeze" @unfreeze="(u) => setFreeze('unfreeze', u)" />
+
       <section data-testid="new-release" class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">New release</h3>
         <ReleaseLoading v-if="!unitsLoaded">Loading release units…</ReleaseLoading>
-        <ReleaseUnitList v-else :units="units" :busy="busy" :error="unitsError" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
+        <ReleaseUnitList v-else :units="units" :busy="busy" :error="unitsError" :freeze="freezeError ? null : freeze" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
       </section>
 
       <section data-testid="history" class="rounded-[14px] border border-border bg-bg-card p-5">

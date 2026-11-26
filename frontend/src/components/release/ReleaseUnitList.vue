@@ -1,31 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { UnitRow } from '../../types/release'
+import type { UnitFreeze, UnitRow } from '../../types/release'
 import ReleaseSpinner from './ReleaseSpinner.vue'
+import { groupUnits } from '../../lib/unitGroups'
 
-const props = defineProps<{ units: UnitRow[]; busy: boolean; error: string }>()
+const props = defineProps<{ units: UnitRow[]; busy: boolean; error: string; freeze: UnitFreeze[] | null }>()
 const emit = defineEmits<{ cut: [units: string[]]; open: [releaseId: string]; 'open-builds': [] }>()
 
 const ticked = ref<string[]>([])
 
-// Unit roots look like ppg:staging:18[:extras]; the third segment is the major.
-function major(unit: string): string {
-  return unit.split(':')[2] ?? 'common'
-}
-
-const groups = computed(() => {
-  const m = new Map<string, UnitRow[]>()
-  for (const u of props.units) {
-    const k = major(u.unit)
-    m.set(k, [...(m.get(k) ?? []), u])
-  }
-  const keys = [...m.keys()].sort((a, b) => {
-    if (a === 'common') return 1
-    if (b === 'common') return -1
-    return (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0)
-  })
-  return keys.map((k) => ({ key: k, title: /^\d+$/.test(k) ? `PostgreSQL ${k}` : 'Common', rows: m.get(k)! }))
-})
+const groups = computed(() => groupUnits(props.units))
 
 // Drop ticks on units that are no longer tickable, so one that is blocked and
 // later tickable again is not silently re-ticked.
@@ -46,6 +30,26 @@ const pillClass = (u: UnitRow) => {
   if (u.blocked?.reason === 'in_flight') return 'bg-warn-tint text-warn'
   if (u.blocked?.reason === 'unchanged') return 'bg-bg-muted text-text-muted'
   return u.built < u.total ? 'bg-fail-tint text-fail' : 'bg-ok-tint text-ok'
+}
+
+const freezeOf = (unit: string) => props.freeze?.find((f) => f.unit === unit)
+const freezePill = (unit: string) => {
+  const state = freezeOf(unit)?.state
+  if (state === 'frozen') return { text: '❄ frozen', cls: 'bg-brand-purple-tint text-brand-purple' }
+  if (state === 'partial') return { text: '❄ partly frozen', cls: 'bg-warn-tint text-warn' }
+  return null
+}
+
+// The warning for a ticked unit that is not fully frozen; null when there is nothing to say.
+const NOT_FROZEN_TAIL = 'a dependency update can start rebuilds while this release is prepared.'
+const notFrozenText = (unit: string): string | null => {
+  const f = freezeOf(unit)
+  if (f?.state === 'unfrozen') return `Not frozen: ${NOT_FROZEN_TAIL}`
+  if (f?.state === 'partial') {
+    const frozen = f.instances.filter((i) => i.state === 'frozen').map((i) => i.instance)
+    return frozen.length ? `Frozen on ${frozen.join(', ')} only: ${NOT_FROZEN_TAIL}` : `Not frozen: ${NOT_FROZEN_TAIL}`
+  }
+  return null
 }
 </script>
 
@@ -79,7 +83,15 @@ const pillClass = (u: UnitRow) => {
               <span v-if="u.members.length">{{ u.members.join(' · ') }} &nbsp;·&nbsp; </span>last released {{ u.last_release || 'never' }}
             </div>
           </div>
-          <span class="whitespace-nowrap rounded-full px-2 py-[2px] text-[11px]" :class="pillClass(u)">{{ u.built }} / {{ u.total }} built</span>
+          <div class="flex items-center gap-1">
+            <span
+              v-if="freezePill(u.unit)"
+              data-testid="freeze-pill"
+              class="whitespace-nowrap rounded-full px-2 py-[2px] text-[11px]"
+              :class="freezePill(u.unit)!.cls"
+            >{{ freezePill(u.unit)!.text }}</span>
+            <span class="whitespace-nowrap rounded-full px-2 py-[2px] text-[11px]" :class="pillClass(u)">{{ u.built }} / {{ u.total }} built</span>
+          </div>
           <div
             v-if="u.blocked"
             class="col-span-2 col-start-2 flex flex-wrap items-center gap-2 rounded-[4px] border-l-[3px] px-[10px] py-[6px] text-[12px] text-text-primary"
@@ -101,6 +113,11 @@ const pillClass = (u: UnitRow) => {
               @click="emit('open-builds')"
             >Open in Builds</button>
           </div>
+          <div
+            v-if="selected.includes(u.unit) && notFrozenText(u.unit)"
+            data-testid="not-frozen"
+            class="col-span-2 col-start-2 flex flex-wrap items-center gap-2 rounded-[4px] border-l-[3px] border-warn bg-warn-tint px-[10px] py-[6px] text-[12px] text-text-primary"
+          >{{ notFrozenText(u.unit) }}</div>
         </div>
       </section>
       <div v-if="units.length" class="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3 text-[13px] text-text-muted">
