@@ -132,3 +132,16 @@ export interface GitHubConnection {
   token?: { minted_at: string | null; expires_at: string | null; last_error: string; last_error_at: string | null }
   checked_at: string
 }
+
+// Mirrors release.UnitFreeze (GET /api/release/freeze). State is read from OBS on every instance.
+export type FreezeAction = 'freeze' | 'unfreeze'
+export type FreezeUnitState = 'frozen' | 'partial' | 'unfrozen' | ''
+export interface UnitFreeze {
+  unit: string
+  state: FreezeUnitState
+  instances: { instance: string; state: 'frozen' | 'partial' | 'unfrozen' | 'unknown' }[]
+  frozen_by: string
+  frozen_at: string | null
+  pending: { action: FreezeAction; url: string; by: string } | null
+  failed: { action: FreezeAction; instances: string[]; url: string } | null
+}

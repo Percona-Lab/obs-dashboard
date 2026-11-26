@@ -16,15 +16,32 @@ describe('useRelease', () => {
     const f = vi.fn(() => Promise.resolve(json(snap)))
     vi.stubGlobal('fetch', f)
     const active = ref(true)
+    const releaseGets = () => (f.mock.calls as unknown as [string, RequestInit?][]).filter(c => c[0] === '/api/release/releases').length
     useRelease().start(active)
     await vi.advanceTimersByTimeAsync(0)
-    expect(f).toHaveBeenCalledTimes(1)
+    expect(releaseGets()).toBe(1)
     await vi.advanceTimersByTimeAsync(15000)
-    expect(f).toHaveBeenCalledTimes(2)
+    expect(releaseGets()).toBe(2)
     active.value = false
     await nextTick()
     await vi.advanceTimersByTimeAsync(30000)
-    expect(f).toHaveBeenCalledTimes(2)
+    expect(releaseGets()).toBe(2)
+  })
+
+  it('every poll tick also requests the freeze state', async () => {
+    const f = vi.fn(() => Promise.resolve(json(snap)))
+    vi.stubGlobal('fetch', f)
+    const active = ref(true)
+    const freezeGets = () => (f.mock.calls as unknown as [string, RequestInit?][]).filter(c => c[0] === '/api/release/freeze').length
+    useRelease().start(active)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(freezeGets()).toBe(1)
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(freezeGets()).toBe(2)
+    active.value = false
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(freezeGets()).toBe(2)
   })
 
   it('does not poll while the document is hidden', async () => {
@@ -37,7 +54,7 @@ describe('useRelease', () => {
     vis.mockReturnValue('visible')
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(0)
-    expect(f).toHaveBeenCalledTimes(1)
+    expect((f.mock.calls as unknown as [string][]).filter(c => c[0] === '/api/release/releases')).toHaveLength(1)
     vis.mockRestore()
   })
 
@@ -214,8 +231,9 @@ describe('useRelease', () => {
   // A fetch mock whose GET /releases calls stay pending until resolved by the test.
   function pendingGets() {
     const gets: ((s: unknown) => void)[] = []
-    const f = vi.fn((_url: string, init?: RequestInit) => {
+    const f = vi.fn((url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return Promise.resolve(json({ id: 'r9' }, 201))
+      if (url === '/api/release/freeze') return Promise.resolve(json({ units: [] }))
       return new Promise<Response>(res => { gets.push(s => res(json(s))) })
     })
     vi.stubGlobal('fetch', f)
@@ -285,5 +303,74 @@ describe('useRelease', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('x', { status: 502 }))))
     await useRelease().refresh()
     expect(hasDrafts('r1')).toBe(true)
+  })
+
+  const freezeBody = { units: [{ unit: 'ppg:staging:18', state: 'frozen', instances: [{ instance: 'obs1', state: 'frozen' }], frozen_by: 'a@b', frozen_at: '2026-11-26T10:00:00Z', pending: null, failed: null }] }
+
+  it('loads the freeze state', async () => {
+    const { freeze, freezeError, loadFreeze } = useRelease()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json(freezeBody))))
+    await loadFreeze()
+    expect(freeze.value).toEqual(freezeBody.units)
+    expect(freezeError.value).toBe('')
+  })
+
+  it('loadFreeze keeps cut usable on failure', async () => {
+    const { freeze, freezeError, notice, busy, loadFreeze } = useRelease()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('boom', { status: 500 }))))
+    await loadFreeze()
+    expect(freeze.value).toBeNull()
+    expect(freezeError.value).not.toBe('')
+    expect(notice.value).toBe('')
+    expect(busy.value).toBe(false)
+  })
+
+  it('keeps the last freeze state when a reload fails', async () => {
+    const { freeze, freezeError, loadFreeze } = useRelease()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json(freezeBody))))
+    await loadFreeze()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('boom', { status: 500 }))))
+    await loadFreeze()
+    expect(freeze.value).toEqual(freezeBody.units)
+    expect(freezeError.value).not.toBe('')
+  })
+
+  it('a 401 on the freeze GET does not set an error', async () => {
+    const { freezeError, loadFreeze } = useRelease()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('no', { status: 401 }))))
+    await loadFreeze()
+    expect(freezeError.value).toBe('')
+  })
+
+  it('setFreeze posts and reloads', async () => {
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === 'POST' ? new Response(null, { status: 204 }) : json(freezeBody)))
+    vi.stubGlobal('fetch', f)
+    const r = useRelease()
+    expect(await r.setFreeze('freeze', ['ppg:staging:18'])).toBe(true)
+    const calls = f.mock.calls as unknown as [string, RequestInit?][]
+    const post = calls.find(c => c[1]?.method === 'POST')!
+    expect(post[0]).toBe('/api/release/freeze')
+    expect(JSON.parse(post[1]!.body as string)).toEqual({ action: 'freeze', units: ['ppg:staging:18'] })
+    expect(calls.some(c => c[0] === '/api/release/freeze' && !c[1]?.method)).toBe(true)
+    expect(r.freeze.value).toEqual(freezeBody.units)
+    expect(r.busy.value).toBe(false)
+  })
+
+  it('setFreeze shows the server text on 409', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === 'POST' ? new Response('unit is busy', { status: 409 }) : json(freezeBody))))
+    const r = useRelease()
+    expect(await r.setFreeze('unfreeze', ['ppg:staging:18'])).toBe(false)
+    expect(r.notice.value).toBe('unit is busy')
+  })
+
+  it('resetReleaseForTests clears the freeze state', async () => {
+    const r = useRelease()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('boom', { status: 500 }))))
+    await r.loadFreeze()
+    resetReleaseForTests()
+    expect(r.freeze.value).toBeNull()
+    expect(r.freezeError.value).toBe('')
   })
 })

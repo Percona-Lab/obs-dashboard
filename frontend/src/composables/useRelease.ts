@@ -2,7 +2,7 @@ import { ref, watch, type Ref, type WatchStopHandle } from 'vue'
 import { handleUnauthorized } from './useAuth'
 import { errorText } from './http'
 import { pruneDrafts } from './useChangelogDrafts'
-import type { HistoryPage, ReleaseAction, Snapshot, UnitRow } from '../types/release'
+import type { FreezeAction, HistoryPage, ReleaseAction, Snapshot, UnitFreeze, UnitRow } from '../types/release'
 
 export const RELEASE_POLL_MS = 15_000
 const CONFLICT_NOTICE = 'This release changed. The view has been refreshed.'
@@ -22,6 +22,10 @@ const loadFailed = ref(false)
 const pending = ref('')
 const notice = ref('')
 const busy = ref(false)
+// The freeze state of every unit, read from OBS. null until the first successful load.
+const freeze = ref<UnitFreeze[] | null>(null)
+// '' on success; the message of the latest failed load otherwise (freeze keeps its last value).
+const freezeError = ref('')
 
 let timer: ReturnType<typeof setInterval> | undefined
 let stopWatch: WatchStopHandle | undefined
@@ -73,6 +77,19 @@ function doRefresh(fresh = false): Promise<void> {
   return p
 }
 
+// loadFreeze reads the freeze state. A failure keeps the last good state.
+async function loadFreeze(): Promise<void> {
+  try {
+    const res = await fetch(`${BASE}/freeze`)
+    if (res.status === 401) { handleUnauthorized(); return }
+    if (!res.ok) { freezeError.value = await errorText(res); return }
+    freeze.value = ((await res.json()) as { units?: UnitFreeze[] }).units ?? []
+    freezeError.value = ''
+  } catch {
+    freezeError.value = 'Network error'
+  }
+}
+
 async function loadUnits(): Promise<void> {
   try {
     const res = await fetch(`${BASE}/units`)
@@ -88,7 +105,9 @@ async function loadUnits(): Promise<void> {
 }
 
 // send performs a write, then always refreshes the snapshot. Returns the
-// response when it was ok, otherwise null with `notice` set.
+// response when it was ok, otherwise null with `notice` set. A 409 gets the
+// "This release changed" notice, unless serverConflict is set: then the
+// server's text is shown.
 // What of a release is visible in the wizard and changes when an action took
 // effect. undefined when the release is not in the snapshot.
 function shown(id: string): string | undefined {
@@ -119,7 +138,7 @@ async function settle(id: string, before: string): Promise<void> {
 
 // `id` names the release the action is about, when it is one already shown:
 // the action then stays pending until that release changes on screen.
-async function send(what: string, method: string, path: string, body: unknown, id?: string): Promise<Response | null> {
+async function send(what: string, method: string, path: string, body: unknown, id?: string, serverConflict = false): Promise<Response | null> {
   busy.value = true
   pending.value = what
   notice.value = ''
@@ -133,7 +152,7 @@ async function send(what: string, method: string, path: string, body: unknown, i
     })
     if (res.status === 401) handleUnauthorized()
     if (!res.ok) {
-      notice.value = res.status === 409 ? CONFLICT_NOTICE : await errorText(res)
+      notice.value = res.status === 409 && !serverConflict ? CONFLICT_NOTICE : await errorText(res)
     }
     ok = res.ok
     return res.ok ? res : null
@@ -170,6 +189,13 @@ async function act(id: string, action: ReleaseAction, head: string, confirmFaile
   return (await send(action, 'POST', `/releases/${encodeURIComponent(id)}/${action}`, { head, confirm_failed: confirmFailed }, id)) !== null
 }
 
+// setFreeze freezes or unfreezes the units on every instance, then reloads the freeze state.
+async function setFreeze(action: FreezeAction, unitIDs: string[]): Promise<boolean> {
+  const res = await send(action, 'POST', '/freeze', { action, units: unitIDs }, undefined, true)
+  await loadFreeze()
+  return res !== null
+}
+
 // rerunQa runs failed QA lanes again: the lane named lane, or every failed one when lane is ''.
 async function rerunQa(id: string, head: string, lane: string): Promise<boolean> {
   return (await send('rerun-qa', 'POST', `/releases/${encodeURIComponent(id)}/rerun-qa`, { head, lane }, id)) !== null
@@ -200,7 +226,8 @@ function start(active: Ref<boolean>): void {
     stop()
     if (!active.value || document.visibilityState !== 'visible') return
     void doRefresh()
-    timer = setInterval(() => { void doRefresh() }, RELEASE_POLL_MS)
+    void loadFreeze()
+    timer = setInterval(() => { void doRefresh(); void loadFreeze() }, RELEASE_POLL_MS)
   }
   stopWatch = watch(active, sync)
   document.addEventListener('visibilitychange', sync)
@@ -229,12 +256,16 @@ export function resetReleaseForTests(): void {
   pending.value = ''
   notice.value = ''
   busy.value = false
+  freeze.value = null
+  freezeError.value = ''
 }
 
 export function useRelease() {
   return {
     enabled, snapshot, units, unitsError, unitsLoaded, loadFailed, notice, busy, pending,
-    loadStatus, refresh: () => doRefresh(), loadUnits,
+    freeze, freezeError,
+    loadStatus, refresh: () => { const p = doRefresh(); void loadFreeze(); return p }, loadUnits,
+    loadFreeze, setFreeze,
     start, stopPolling,
     cut, saveChangelog, resetChangelog, act, rerunQa, loadHistory,
   }
