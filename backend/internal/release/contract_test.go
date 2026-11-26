@@ -1,6 +1,9 @@
 package release
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestRunNames(t *testing.T) {
 	if got := CutRunName("release/20261111T143210"); got != "Cut release/20261111T143210" {
@@ -39,6 +42,22 @@ func TestInstanceOfUnexpandedMatrix(t *testing.T) {
 	} {
 		if got, ok := InstanceOf(c[0], c[1]); ok || got != "" {
 			t.Errorf("InstanceOf(%q) = (%q, %v), want no instance", c[0], got, ok)
+		}
+	}
+}
+
+func TestParseFreezeRunName(t *testing.T) {
+	a, u, ok := ParseFreezeRunName("freeze ppg:staging:18 ppg:staging:17:extras")
+	if !ok || a != ActionFreeze || !reflect.DeepEqual(u, []string{"ppg:staging:18", "ppg:staging:17:extras"}) {
+		t.Errorf("freeze: got (%q, %v, %v)", a, u, ok)
+	}
+	a, u, ok = ParseFreezeRunName(FreezeRunName(ActionUnfreeze, []string{"ppg:staging:16"}))
+	if !ok || a != ActionUnfreeze || !reflect.DeepEqual(u, []string{"ppg:staging:16"}) {
+		t.Errorf("round trip unfreeze: got (%q, %v, %v)", a, u, ok)
+	}
+	for _, bad := range []string{"", "freeze", "thaw ppg:staging:18", "Cut release/20261126T100000"} {
+		if _, _, ok := ParseFreezeRunName(bad); ok {
+			t.Errorf("ParseFreezeRunName(%q) ok, want false", bad)
 		}
 	}
 }
