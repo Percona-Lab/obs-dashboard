@@ -126,7 +126,7 @@ const when = (iso: string | null) => {
       <section data-testid="new-release" class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">New release</h3>
         <ReleaseLoading v-if="!unitsLoaded">Loading release units…</ReleaseLoading>
-        <ReleaseUnitList v-else :units="units" :busy="busy" :error="unitsError" :freeze="freeze" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
+        <ReleaseUnitList v-else :units="units" :busy="busy" :error="unitsError" :freeze="freezeError ? null : freeze" @cut="onCut" @open="openRelease" @open-builds="emit('open-builds')" />
       </section>
 
       <section data-testid="history" class="rounded-[14px] border border-border bg-bg-card p-5">

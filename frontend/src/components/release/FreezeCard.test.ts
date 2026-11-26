@@ -142,4 +142,44 @@ describe('FreezeCard', () => {
     expect(w.emitted('update:pickerOpen')).toBeUndefined()
     expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(true)
   })
+
+  it('shows the load error above the last known rows', () => {
+    const w = mk({ error: 'boom' })
+    expect(w.get('[data-testid="freeze-error"]').text()).toContain('Could not load the freeze state: boom')
+    expect(w.findAll('[data-unit]').length).toBe(3)
+    expect(w.find('[data-testid="release-loading"]').exists()).toBe(false)
+  })
+
+  it('lists a unit whose run failed everywhere, without action buttons', () => {
+    const w = mk({ freeze: [uf({ unit: 'ppg:staging:16', state: 'unfrozen', failed: { action: 'freeze', instances: ['labs', 'obs'], url: 'https://github.com/r/9' } })] })
+    const r = w.get('[data-unit="ppg:staging:16"]')
+    expect(r.text()).toContain('The last freeze failed on labs, obs')
+    expect(r.find('a[href="https://github.com/r/9"]').exists()).toBe(true)
+    expect(r.find('[data-testid="unfreeze"]').exists()).toBe(false)
+    expect(r.find('[data-testid="freeze-everywhere"]').exists()).toBe(false)
+    expect(w.get('[data-testid="freeze-count"]').text()).toBe('0 frozen')
+    expect(w.text()).not.toContain('No frozen units.')
+    const e = mk({ freeze: [uf({ state: '', failed: { action: 'unfreeze', instances: [], url: '' } })] })
+    expect(e.text()).toContain('The last unfreeze failed')
+    expect(e.text()).not.toContain('failed on')
+  })
+
+  it('lists a unit that could not be read at all, without action buttons', () => {
+    const w = mk({ freeze: [uf({ unit: 'ppg:staging:15', state: '', instances: [{ instance: 'labs', state: 'unknown' }, { instance: 'obs', state: 'unknown' }] })] })
+    const r = w.get('[data-unit="ppg:staging:15"]')
+    expect(r.text()).toContain('could not read labs, obs')
+    expect(r.find('[data-testid="unfreeze"]').exists()).toBe(false)
+    expect(w.text()).not.toContain('No frozen units.')
+  })
+
+  it('does not list unknown instances as not frozen, and words a partial with no frozen instance', () => {
+    const a = mk({ freeze: [uf({ state: 'partial', instances: [
+      { instance: 'labs', state: 'frozen' }, { instance: 'obs', state: 'unfrozen' }, { instance: 'x', state: 'unknown' }] })] })
+    expect(a.text()).toContain('labs only — not frozen on obs')
+    expect(a.text()).not.toContain('not frozen on obs, x')
+    expect(a.text()).toContain('could not read x')
+    const b = mk({ freeze: [uf({ state: 'partial', instances: [{ instance: 'labs', state: 'partial' }, { instance: 'obs', state: 'unfrozen' }] })] })
+    expect(b.text()).toContain('partly frozen on labs')
+    expect(b.text()).not.toContain(' only')
+  })
 })

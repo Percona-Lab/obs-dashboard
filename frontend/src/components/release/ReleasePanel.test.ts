@@ -219,4 +219,22 @@ describe('ReleasePanel', () => {
     expect((w.get('[data-testid="freeze-picker"] [data-unit="ppg:staging:17"] input').element as HTMLInputElement).checked).toBe(true)
     expect(w.find('[data-testid="release-notice"]').exists()).toBe(true)
   })
+
+  it('drops the freeze pill from the cut list when the freeze state stops loading', async () => {
+    let freezeOk = true
+    const frozen = { unit: 'ppg:staging:17', state: 'frozen', instances: [], frozen_by: '', frozen_at: null, pending: null, failed: null }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(
+      url.includes('/freeze') ? (freezeOk ? json({ units: [frozen] }) : new Response('down', { status: 502 }))
+        : url.includes('/history') ? json({ rows: [] })
+          : json({ units: [{ unit: 'ppg:staging:17', members: [], release_project: '', release_dir: '', last_release: '', built: 1, total: 1, tickable: true }] }))))
+    useRelease().snapshot.value = snap([])
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    expect(w.find('[data-testid="freeze-pill"]').exists()).toBe(true)
+    freezeOk = false
+    await useRelease().loadFreeze()
+    await flushPromises()
+    expect(w.find('[data-testid="freeze-error"]').exists()).toBe(true)
+    expect(w.find('[data-testid="freeze-pill"]').exists()).toBe(false)
+  })
 })

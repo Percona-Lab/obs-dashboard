@@ -11,22 +11,28 @@ const props = defineProps<{ freeze: UnitFreeze[] | null; units: UnitRow[]; error
 const emit = defineEmits<{ freeze: [units: string[]]; unfreeze: [units: string[]]; 'update:pickerOpen': [open: boolean] }>()
 
 const isFrozen = (f: UnitFreeze) => f.state === 'frozen' || f.state === 'partial'
-const rows = computed(() => (props.freeze ?? []).filter((f) => isFrozen(f) || f.pending))
+const hasUnknown = (f: UnitFreeze) => (f.instances ?? []).some((i) => i.state === 'unknown')
+const rows = computed(() => (props.freeze ?? []).filter((f) => isFrozen(f) || f.pending || f.failed || hasUnknown(f)))
 const frozenCount = computed(() => (props.freeze ?? []).filter(isFrozen).length)
 
 const when = (iso: string | null) => {
   const d = iso ? new Date(iso) : null
   return d && !Number.isNaN(d.getTime()) ? d.toLocaleString() : ''
 }
-const names = (f: UnitFreeze, state: string) => f.instances.filter((i) => i.state === state).map((i) => i.instance)
+const names = (f: UnitFreeze, state: string) => (f.instances ?? []).filter((i) => i.state === state).map((i) => i.instance)
 
 function detail(f: UnitFreeze): string {
   const parts: string[] = []
   if (f.frozen_by) parts.push(['frozen by ' + f.frozen_by, when(f.frozen_at)].filter(Boolean).join(' · '))
   if (f.state === 'frozen') parts.push('all instances')
   if (f.state === 'partial') {
-    const others = f.instances.filter((i) => i.state !== 'frozen').map((i) => i.instance)
-    parts.push(`${names(f, 'frozen').join(', ')} only — not frozen on ${others.join(', ')}`)
+    const frozen = names(f, 'frozen')
+    if (frozen.length) {
+      const others = (f.instances ?? []).filter((i) => i.state !== 'frozen' && i.state !== 'unknown').map((i) => i.instance)
+      parts.push(`${frozen.join(', ')} only` + (others.length ? ` — not frozen on ${others.join(', ')}` : ''))
+    } else {
+      parts.push(`partly frozen on ${names(f, 'partial').join(', ')}`)
+    }
   }
   const unknown = names(f, 'unknown')
   if (unknown.length) parts.push(`could not read ${unknown.join(', ')}`)
@@ -63,11 +69,11 @@ function confirmUnfreeze() {
       >Freeze units…</button>
     </div>
 
-    <div v-if="!freeze && error" data-testid="freeze-error" class="rounded-[10px] border border-fail bg-fail-tint px-3 py-2 text-[13px] text-fail">
+    <div v-if="error" data-testid="freeze-error" class="rounded-[10px] border border-fail bg-fail-tint px-3 py-2 text-[13px] text-fail">
       Could not load the freeze state: {{ error }}
     </div>
-    <ReleaseLoading v-else-if="!freeze">Loading the freeze state…</ReleaseLoading>
-    <template v-else>
+    <ReleaseLoading v-if="!freeze && !error">Loading the freeze state…</ReleaseLoading>
+    <template v-else-if="freeze">
       <div v-if="!rows.length" class="text-[13px] text-text-muted">No frozen units.</div>
       <ul v-else class="m-0 flex list-none flex-col gap-[6px] p-0">
         <li v-for="f in rows" :key="f.unit" :data-unit="f.unit" class="flex flex-col gap-1 rounded-[10px] border border-border px-3 py-[10px]">
@@ -85,6 +91,7 @@ function confirmUnfreeze() {
               @click="emit('freeze', [f.unit])"
             >Freeze everywhere</button>
             <button
+              v-if="isFrozen(f) || f.pending"
               type="button"
               data-testid="unfreeze"
               class="cursor-pointer rounded-md border border-border bg-transparent px-3 py-[4px] text-[12px] font-semibold text-text-primary disabled:cursor-default disabled:opacity-50"
@@ -99,7 +106,7 @@ function confirmUnfreeze() {
             <a v-if="safeHref(f.pending.url)" :href="safeHref(f.pending.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">workflow run</a>
           </div>
           <div v-if="f.failed" class="flex flex-wrap items-center gap-2 rounded-[4px] border-l-[3px] border-fail bg-fail-tint px-[10px] py-[6px] text-[12px] text-text-primary">
-            <span>The last {{ f.failed.action }} failed on {{ f.failed.instances.join(', ') }}</span>
+            <span>The last {{ f.failed.action }} failed{{ f.failed.instances.length ? ' on ' + f.failed.instances.join(', ') : '' }}</span>
             <a v-if="safeHref(f.failed.url)" :href="safeHref(f.failed.url)" target="_blank" rel="noopener noreferrer" class="text-brand-purple">workflow run</a>
           </div>
         </li>
