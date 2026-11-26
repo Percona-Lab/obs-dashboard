@@ -63,6 +63,12 @@ async function onCut(ticked: string[]) {
   }, START_WAIT_MS)
 }
 
+// The picker stays open when the freeze fails, so the selection is kept.
+const pickerOpen = ref(false)
+async function onFreeze(units: string[]) {
+  if (await setFreeze('freeze', units)) pickerOpen.value = false
+}
+
 // blocked.release_id may be a unit release id rather than the release's own id.
 function openRelease(id: string) {
   const r = releases.value.find((x) => x.id === id || x.units.some((u) => u.release_id === id))
@@ -115,7 +121,7 @@ const when = (iso: string | null) => {
         </ul>
       </section>
 
-      <FreezeCard :freeze="freeze" :units="units" :error="freezeError" :busy="busy" @freeze="(u) => setFreeze('freeze', u)" @unfreeze="(u) => setFreeze('unfreeze', u)" />
+      <FreezeCard v-model:picker-open="pickerOpen" :freeze="freeze" :units="units" :error="freezeError" :busy="busy" @freeze="onFreeze" @unfreeze="(u) => setFreeze('unfreeze', u)" />
 
       <section data-testid="new-release" class="rounded-[14px] border border-border bg-bg-card p-5">
         <h3 class="m-0 mb-3 text-[14px] font-bold text-text-primary">New release</h3>

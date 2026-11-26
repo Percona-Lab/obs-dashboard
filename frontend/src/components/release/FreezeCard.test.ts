@@ -22,8 +22,8 @@ const freeze: UnitFreeze[] = [
 ]
 const units = [row({ unit: 'ppg:staging:18' }), row({ unit: 'ppg:staging:17' })]
 
-const mk = (p: Partial<{ freeze: UnitFreeze[] | null; units: UnitRow[]; error: string; busy: boolean }> = {}) =>
-  mount(FreezeCard, { props: { freeze, units, error: '', busy: false, ...p } })
+const mk = (p: Partial<{ freeze: UnitFreeze[] | null; units: UnitRow[]; error: string; busy: boolean; pickerOpen: boolean }> = {}) =>
+  mount(FreezeCard, { props: { freeze, units, error: '', busy: false, pickerOpen: false, ...p } })
 
 describe('FreezeCard', () => {
   it('lists the frozen, partial and pending units with the count', () => {
@@ -113,23 +113,33 @@ describe('FreezeCard', () => {
     expect(w.text()).toContain('could not read labs')
   })
 
-  it('opens the picker, and closes it when the freeze has been sent', async () => {
+  it('asks to open the picker', async () => {
     const w = mk()
+    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(false)
     await w.get('[data-testid="freeze-open"]').trigger('click')
+    expect(w.emitted('update:pickerOpen')![0]).toEqual([true])
+  })
+
+  it('renders the picker only while pickerOpen is true and passes its freeze on', async () => {
+    const w = mk({ pickerOpen: true })
     expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(true)
     await w.get('[data-unit="ppg:staging:17"] input').setValue(true)
     await w.get('[data-testid="freeze-submit"]').trigger('click')
     expect(w.emitted('freeze')![0]).toEqual([['ppg:staging:17']])
-    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(true)
-    await w.setProps({ busy: true })
-    await w.setProps({ busy: false })
-    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(false)
+    expect(w.emitted('update:pickerOpen')).toBeUndefined()
   })
 
-  it('closes the picker on cancel', async () => {
-    const w = mk()
-    await w.get('[data-testid="freeze-open"]').trigger('click')
+  it('asks to close the picker on cancel', async () => {
+    const w = mk({ pickerOpen: true })
     await w.get('[data-testid="freeze-cancel"]').trigger('click')
-    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(false)
+    expect(w.emitted('update:pickerOpen')![0]).toEqual([false])
+  })
+
+  it('does not touch the picker when busy changes', async () => {
+    const w = mk({ pickerOpen: true })
+    await w.setProps({ busy: true })
+    await w.setProps({ busy: false })
+    expect(w.emitted('update:pickerOpen')).toBeUndefined()
+    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(true)
   })
 })

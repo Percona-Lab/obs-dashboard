@@ -189,10 +189,11 @@ describe('ReleasePanel', () => {
     expect(w.get('[data-testid="freeze-card"]').text()).toContain('No frozen units.')
   })
 
-  it('freezes the picked units through the composable', async () => {
-    const fetchMock = vi.fn((url: string, init?: RequestInit) => Promise.resolve(json(
-      init?.method === 'POST' ? {} : url.includes('/freeze') ? { units: [{ unit: 'ppg:staging:17', state: 'unfrozen', instances: [], frozen_by: '', frozen_at: null, pending: null, failed: null }] }
-        : url.includes('/history') ? { rows: [] } : { units: [{ unit: 'ppg:staging:17', members: [], release_project: '', release_dir: '', last_release: '', built: 1, total: 1, tickable: true }] })))
+  async function pickAndFreeze(status: number) {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => Promise.resolve(
+      init?.method === 'POST' ? (status === 204 ? new Response(null, { status }) : new Response('conflict', { status }))
+        : json(url.includes('/freeze') ? { units: [{ unit: 'ppg:staging:17', state: 'unfrozen', instances: [], frozen_by: '', frozen_at: null, pending: null, failed: null }] }
+          : url.includes('/history') ? { rows: [] } : { units: [{ unit: 'ppg:staging:17', members: [], release_project: '', release_dir: '', last_release: '', built: 1, total: 1, tickable: true }] })))
     vi.stubGlobal('fetch', fetchMock)
     useRelease().snapshot.value = snap([])
     const w = mount(ReleasePanel)
@@ -201,9 +202,21 @@ describe('ReleasePanel', () => {
     await w.get('[data-testid="freeze-picker"] [data-unit="ppg:staging:17"] input').setValue(true)
     await w.get('[data-testid="freeze-submit"]').trigger('click')
     await flushPromises()
+    return { w, fetchMock }
+  }
+
+  it('freezes the picked units and closes the picker on success', async () => {
+    const { w, fetchMock } = await pickAndFreeze(204)
     const post = fetchMock.mock.calls.find(([, i]) => (i as RequestInit | undefined)?.method === 'POST')!
     expect(String(post[0])).toContain('/freeze')
     expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ action: 'freeze', units: ['ppg:staging:17'] })
     expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(false)
+  })
+
+  it('keeps the picker and its ticks open when the freeze fails', async () => {
+    const { w } = await pickAndFreeze(409)
+    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(true)
+    expect((w.get('[data-testid="freeze-picker"] [data-unit="ppg:staging:17"] input').element as HTMLInputElement).checked).toBe(true)
+    expect(w.find('[data-testid="release-notice"]').exists()).toBe(true)
   })
 })

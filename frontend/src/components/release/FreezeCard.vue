@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { FreezeAction, UnitFreeze, UnitRow } from '../../types/release'
 import { safeHref } from '../../lib/safeHref'
 import ReleaseConfirm from './ReleaseConfirm.vue'
@@ -7,8 +7,8 @@ import ReleaseLoading from './ReleaseLoading.vue'
 import ReleaseSpinner from './ReleaseSpinner.vue'
 import FreezePicker from './FreezePicker.vue'
 
-const props = defineProps<{ freeze: UnitFreeze[] | null; units: UnitRow[]; error: string; busy: boolean }>()
-const emit = defineEmits<{ freeze: [units: string[]]; unfreeze: [units: string[]] }>()
+const props = defineProps<{ freeze: UnitFreeze[] | null; units: UnitRow[]; error: string; busy: boolean; pickerOpen: boolean }>()
+const emit = defineEmits<{ freeze: [units: string[]]; unfreeze: [units: string[]]; 'update:pickerOpen': [open: boolean] }>()
 
 const isFrozen = (f: UnitFreeze) => f.state === 'frozen' || f.state === 'partial'
 const rows = computed(() => (props.freeze ?? []).filter((f) => isFrozen(f) || f.pending))
@@ -42,19 +42,6 @@ function confirmUnfreeze() {
   confirming.value = null
   if (unit) emit('unfreeze', [unit])
 }
-
-const picking = ref(false)
-const sent = ref(false)
-function onPick(units: string[]) {
-  sent.value = true
-  emit('freeze', units)
-}
-function closePicker() {
-  picking.value = false
-  sent.value = false
-}
-// The picker closes once the request it sent is done.
-watch(() => props.busy, (now, was) => { if (was && !now && sent.value) closePicker() })
 </script>
 
 <template>
@@ -72,7 +59,7 @@ watch(() => props.busy, (now, was) => { if (was && !now && sent.value) closePick
         type="button"
         data-testid="freeze-open"
         class="cursor-pointer rounded-[8px] border border-border-strong bg-bg-card px-3 py-[6px] text-[13px] font-semibold text-brand-purple"
-        @click="picking = true"
+        @click="emit('update:pickerOpen', true)"
       >Freeze units…</button>
     </div>
 
@@ -128,6 +115,6 @@ watch(() => props.busy, (now, was) => { if (was && !now && sent.value) closePick
       @confirm="confirmUnfreeze"
       @cancel="confirming = null"
     />
-    <FreezePicker v-if="picking && freeze" :freeze="freeze" :units="units" :busy="busy" @freeze="onPick" @cancel="closePicker" />
+    <FreezePicker v-if="pickerOpen && freeze" :freeze="freeze" :units="units" :busy="busy" @freeze="(u) => emit('freeze', u)" @cancel="emit('update:pickerOpen', false)" />
   </section>
 </template>
