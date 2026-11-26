@@ -176,4 +176,34 @@ describe('ReleasePanel', () => {
     expect(li.text()).not.toContain('Cut failed')
     expect(li.find('.text-fail').exists()).toBe(false)
   })
+
+  it('mounts the build freeze card between in flight and new release, and loads its state', async () => {
+    const fetchMock = vi.fn((url: string) => Promise.resolve(json(url.includes('/freeze') ? { units: [] } : url.includes('/history') ? { rows: [] } : { units: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+    useRelease().snapshot.value = snap([])
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    const order = w.findAll('[data-testid="in-flight"], [data-testid="freeze-card"], [data-testid="new-release"]').map((e) => e.attributes('data-testid'))
+    expect(order).toEqual(['in-flight', 'freeze-card', 'new-release'])
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/release/freeze'))).toBe(true)
+    expect(w.get('[data-testid="freeze-card"]').text()).toContain('No frozen units.')
+  })
+
+  it('freezes the picked units through the composable', async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => Promise.resolve(json(
+      init?.method === 'POST' ? {} : url.includes('/freeze') ? { units: [{ unit: 'ppg:staging:17', state: 'unfrozen', instances: [], frozen_by: '', frozen_at: null, pending: null, failed: null }] }
+        : url.includes('/history') ? { rows: [] } : { units: [{ unit: 'ppg:staging:17', members: [], release_project: '', release_dir: '', last_release: '', built: 1, total: 1, tickable: true }] })))
+    vi.stubGlobal('fetch', fetchMock)
+    useRelease().snapshot.value = snap([])
+    const w = mount(ReleasePanel)
+    await flushPromises()
+    await w.get('[data-testid="freeze-open"]').trigger('click')
+    await w.get('[data-testid="freeze-picker"] [data-unit="ppg:staging:17"] input').setValue(true)
+    await w.get('[data-testid="freeze-submit"]').trigger('click')
+    await flushPromises()
+    const post = fetchMock.mock.calls.find(([, i]) => (i as RequestInit | undefined)?.method === 'POST')!
+    expect(String(post[0])).toContain('/freeze')
+    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ action: 'freeze', units: ['ppg:staging:17'] })
+    expect(w.find('[data-testid="freeze-picker"]').exists()).toBe(false)
+  })
 })

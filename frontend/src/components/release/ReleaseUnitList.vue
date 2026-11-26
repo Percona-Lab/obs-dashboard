@@ -2,30 +2,14 @@
 import { computed, ref, watch } from 'vue'
 import type { UnitRow } from '../../types/release'
 import ReleaseSpinner from './ReleaseSpinner.vue'
+import { groupUnits } from '../../lib/unitGroups'
 
 const props = defineProps<{ units: UnitRow[]; busy: boolean; error: string }>()
 const emit = defineEmits<{ cut: [units: string[]]; open: [releaseId: string]; 'open-builds': [] }>()
 
 const ticked = ref<string[]>([])
 
-// Unit roots look like ppg:staging:18[:extras]; the third segment is the major.
-function major(unit: string): string {
-  return unit.split(':')[2] ?? 'common'
-}
-
-const groups = computed(() => {
-  const m = new Map<string, UnitRow[]>()
-  for (const u of props.units) {
-    const k = major(u.unit)
-    m.set(k, [...(m.get(k) ?? []), u])
-  }
-  const keys = [...m.keys()].sort((a, b) => {
-    if (a === 'common') return 1
-    if (b === 'common') return -1
-    return (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0)
-  })
-  return keys.map((k) => ({ key: k, title: /^\d+$/.test(k) ? `PostgreSQL ${k}` : 'Common', rows: m.get(k)! }))
-})
+const groups = computed(() => groupUnits(props.units))
 
 // Drop ticks on units that are no longer tickable, so one that is blocked and
 // later tickable again is not silently re-ticked.
