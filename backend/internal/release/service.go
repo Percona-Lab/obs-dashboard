@@ -256,6 +256,7 @@ type Options struct {
 	GitHub   GitHub
 	DB       *sql.DB
 	Packages PackageSource
+	Freeze   FreezeSource // nil: no OBS freeze state
 	Now      func() time.Time
 	TTL      time.Duration // how long a snapshot is reused; 15s when zero
 }
@@ -330,6 +331,15 @@ type Service struct {
 	// Cuts dispatched and not yet listed by GitHub, by branch. Also under
 	// cacheMu. Not release state: an entry lives two minutes at most.
 	pending map[string]pendingCut
+
+	// Freeze state. freezeMu is never held across a GitHub, OBS or database
+	// call.
+	freezeMu      sync.Mutex
+	freezeSrc     FreezeSource
+	freezeGen     uint64                     // bumped when freezeMeta is dropped
+	freezeMeta    map[string]freezeMetaEntry // unit -> OBS read
+	freezePending map[string]freezeDispatch  // unit -> dispatch GitHub does not list yet
+	freezeRunning map[int64]bool             // runs seen in progress on the previous read
 }
 
 type refreshCall struct {
@@ -361,7 +371,7 @@ type tagPull struct {
 // NewService returns a Service. Nothing is read until the first call.
 func NewService(o Options) *Service {
 	s := &Service{
-		gh: o.GitHub, db: o.DB, pkgs: o.Packages, now: o.Now, ttl: o.TTL,
+		gh: o.GitHub, db: o.DB, pkgs: o.Packages, now: o.Now, ttl: o.TTL, freezeSrc: o.Freeze,
 		tagPulls:     map[string]tagPull{},
 		releasedTags: map[string]struct{}{},
 	}
