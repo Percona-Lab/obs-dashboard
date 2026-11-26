@@ -16,6 +16,8 @@ new variable or setting belongs under `### Added` or `### Changed`.
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-11-26
+
 ### Added
 
 - The Releases tab has a "Build freeze" card. It lists the release units that are frozen on OBS, with who froze them from the dashboard and on which instances, and freezes or unfreezes units by starting the `obs-freeze.yml` workflow of obs-packaging. A frozen unit ignores dependency updates; fixes merged to `main` still build.
