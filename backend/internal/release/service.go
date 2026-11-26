@@ -336,13 +336,14 @@ type Service struct {
 	// call.
 	freezeMu  sync.Mutex
 	freezeSrc FreezeSource
-	// freezeRefreshMu serializes OBS refreshes; it is held across OBS calls,
-	// freezeMu is not.
-	freezeRefreshMu sync.Mutex
-	freezeGen       uint64                     // bumped when freezeMeta is dropped
-	freezeMeta      map[string]freezeMetaEntry // unit -> OBS read
-	freezePending   map[string]freezeDispatch  // unit -> dispatch GitHub does not list yet
-	freezeRunning   map[int64]bool             // runs seen in progress on the previous read
+	// freezeRefresh serializes OBS refreshes: a token is held across the OBS
+	// calls (freezeMu is not). A channel, so a wait ends with the caller's
+	// context.
+	freezeRefresh chan struct{}
+	freezeGen     uint64                     // bumped when freezeMeta is dropped
+	freezeMeta    map[string]freezeMetaEntry // unit -> OBS read
+	freezePending map[string]freezeDispatch  // unit -> dispatch GitHub does not list yet
+	freezeRunning map[int64]bool             // runs seen in progress on the previous read
 }
 
 type refreshCall struct {
@@ -377,6 +378,8 @@ func NewService(o Options) *Service {
 		gh: o.GitHub, db: o.DB, pkgs: o.Packages, now: o.Now, ttl: o.TTL, freezeSrc: o.Freeze,
 		tagPulls:     map[string]tagPull{},
 		releasedTags: map[string]struct{}{},
+
+		freezeRefresh: make(chan struct{}, 1),
 	}
 	if s.now == nil {
 		s.now = time.Now

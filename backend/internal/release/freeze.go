@@ -126,6 +126,12 @@ func runInProgress(r Run) bool { return r.Status != "completed" }
 // file order: the state read from OBS, who froze it, and the run in flight or
 // that failed.
 func (s *Service) FreezeStates(ctx context.Context) ([]UnitFreeze, error) {
+	return s.freezeStates(ctx, true)
+}
+
+// freezeStates is FreezeStates; without withOBS the state on OBS is not read
+// (State is "" and Instances empty), only the runs and the audit log are.
+func (s *Service) freezeStates(ctx context.Context, withOBS bool) ([]UnitFreeze, error) {
 	units, err := s.mainUnits(ctx)
 	if err != nil {
 		return nil, err
@@ -145,12 +151,20 @@ func (s *Service) FreezeStates(ctx context.Context) ([]UnitFreeze, error) {
 	for i, u := range units {
 		names[i] = u.def.Unit
 	}
-	inst := s.freezeInstances(ctx, names)
+	inst := map[string][]InstanceFreeze{}
+	if withOBS {
+		if inst, err = s.freezeInstances(ctx, names); err != nil {
+			return nil, err
+		}
+	}
 
 	jobs := map[int64][]Job{}
 	out := make([]UnitFreeze, 0, len(units))
 	for _, name := range names {
 		uf := UnitFreeze{Unit: name, Instances: inst[name], State: unitFreezeState(inst[name])}
+		if uf.Instances == nil {
+			uf.Instances = []InstanceFreeze{}
+		}
 		row, haveRow := audit[name]
 		if haveRow && row.Action == auditFreeze && (uf.State == "frozen" || uf.State == "partial") {
 			at := row.At
@@ -279,13 +293,13 @@ func (s *Service) pendingFreezeOf(unit string, runs []Run) (freezeDispatch, bool
 
 // freezeInstances returns the OBS freeze state of each unit, reusing reads
 // younger than freezeMetaTTL. Units are read concurrently.
-func (s *Service) freezeInstances(ctx context.Context, units []string) map[string][]InstanceFreeze {
+func (s *Service) freezeInstances(ctx context.Context, units []string) (map[string][]InstanceFreeze, error) {
 	out := make(map[string][]InstanceFreeze, len(units))
 	if s.freezeSrc == nil {
 		for _, u := range units {
 			out[u] = []InstanceFreeze{}
 		}
-		return out
+		return out, nil
 	}
 	s.freezeMu.Lock()
 	gen := s.freezeGen
@@ -300,13 +314,23 @@ func (s *Service) freezeInstances(ctx context.Context, units []string) map[strin
 	s.freezeMu.Unlock()
 
 	if len(missing) == 0 {
-		return out
+		return out, nil
 	}
 
 	// One refresh at a time: a caller that waited takes what the running one
 	// stored.
-	s.freezeRefreshMu.Lock()
-	defer s.freezeRefreshMu.Unlock()
+	select {
+	case s.freezeRefresh <- struct{}{}:
+	default:
+		// Another refresh is running: wait for it, but no longer than the
+		// caller does.
+		select {
+		case s.freezeRefresh <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	defer func() { <-s.freezeRefresh }()
 	s.freezeMu.Lock()
 	gen = s.freezeGen
 	still := missing[:0:0]
@@ -320,7 +344,7 @@ func (s *Service) freezeInstances(ctx context.Context, units []string) map[strin
 	s.freezeMu.Unlock()
 	missing = still
 	if len(missing) == 0 {
-		return out
+		return out, nil
 	}
 
 	read := make([][]InstanceFreeze, len(missing))
@@ -354,7 +378,7 @@ func (s *Service) freezeInstances(ctx context.Context, units []string) map[strin
 			s.freezeMeta[u] = freezeMetaEntry{at: s.now(), inst: read[i]}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // SetFreeze dispatches the freeze or unfreeze of units (unit roots) and logs
@@ -368,7 +392,8 @@ func (s *Service) SetFreeze(ctx context.Context, email, action string, units []s
 	if action != ActionFreeze && action != ActionUnfreeze {
 		return fmt.Errorf("%w: unknown action %q", ErrBadRequest, action)
 	}
-	states, err := s.FreezeStates(ctx)
+	// Only the runs decide: no OBS read while actMu is held.
+	states, err := s.freezeStates(ctx, false)
 	if err != nil {
 		return err
 	}

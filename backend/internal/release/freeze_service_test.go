@@ -471,3 +471,62 @@ func TestFreezeStates_JobsErrorKeepsFailure(t *testing.T) {
 		t.Fatalf("failed = %+v", got.Failed)
 	}
 }
+
+// blockingFreeze blocks every read until release is closed.
+type blockingFreeze struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingFreeze) UnitFreeze(context.Context, string) []InstanceFreeze {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return []InstanceFreeze{{"labs", "frozen"}}
+}
+
+// A caller that waits behind a hanging refresh stops waiting when its own
+// context ends.
+func TestFreezeInstances_WaiterLeavesWithItsContext(t *testing.T) {
+	fx := newFixture(t)
+	src := &blockingFreeze{started: make(chan struct{}, 1), release: make(chan struct{})}
+	svc := NewService(Options{GitHub: fx.gh, DB: fx.db, Packages: fakeSource{}, Freeze: src, Now: fx.clock.now})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.freezeInstances(context.Background(), []string{unitA})
+	}()
+	<-src.started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan error, 1)
+	go func() {
+		_, err := svc.freezeInstances(ctx, []string{unitA})
+		res <- err
+	}()
+	cancel()
+	select {
+	case err := <-res:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter is still blocked behind the running refresh")
+	}
+	close(src.release)
+	<-done
+}
+
+// SetFreeze decides on the runs only: it must not wait for OBS.
+func TestSetFreeze_DoesNotReadOBS(t *testing.T) {
+	fx, src := freezeFixture(t)
+	src.set(unitA, InstanceFreeze{"labs", "unfrozen"})
+	if err := fx.svc.SetFreeze(context.Background(), "maria@x", ActionFreeze, []string{unitA}); err != nil {
+		t.Fatal(err)
+	}
+	if n := src.callsOf(unitA); n != 0 {
+		t.Fatalf("OBS reads during SetFreeze = %d, want 0", n)
+	}
+}
